@@ -1,12 +1,12 @@
 module linebot-garbage-helper
 
-go 1.23.2
+go 1.24
 
 require (
 	cloud.google.com/go/firestore v1.15.0
 	github.com/google/generative-ai-go v0.14.0
 	github.com/gorilla/mux v1.8.1
-	github.com/line/line-bot-sdk-go/v8 v8.5.0
+	github.com/line/line-bot-sdk-go/v8 v8.17.0
 	google.golang.org/api v0.180.0
 	googlemaps.github.io/maps v1.5.0
 )
