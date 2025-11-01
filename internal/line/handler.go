@@ -92,10 +92,26 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 		return
 	}
 
+	// Handle common greetings
+	lowerText := strings.ToLower(strings.TrimSpace(text))
+	if lowerText == "hi" || lowerText == "hello" || lowerText == "你好" || lowerText == "哈囉" {
+		welcomeMsg := `👋 您好！歡迎使用垃圾車助手！
+
+🚀 快速開始：
+📍 點擊下方「+」按鈕 → 選擇「位置」→「即時位置」
+💬 或直接輸入地址，例如：「台北市信義區」
+
+我會幫您找到最近的垃圾車站點和時間！
+
+輸入 /help 查看更多功能`
+		h.replyMessage(ctx, userID, welcomeMsg)
+		return
+	}
+
 	intent, err := h.geminiClient.AnalyzeIntent(ctx, text)
 	if err != nil {
 		log.Printf("Error analyzing intent: %v", err)
-		h.replyMessage(ctx, userID, "抱歉，我無法理解您的訊息。請嘗試發送位置或輸入地址。")
+		h.replyMessage(ctx, userID, "抱歉，我無法理解您的訊息。\n\n💡 您可以：\n📍 分享您的位置\n💬 輸入地址\n❓ 輸入 /help 查看使用說明")
 		return
 	}
 
@@ -125,6 +141,30 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 }
 
 func (h *Handler) handleLocationMessage(ctx context.Context, userID string, lat, lng float64, address string) {
+	log.Printf("Received location from user %s: lat=%f, lng=%f, address=%s", userID, lat, lng, address)
+	
+	// If no address provided by LINE, try reverse geocoding
+	if address == "" {
+		location, err := h.geoClient.ReverseGeocode(ctx, lat, lng)
+		if err != nil {
+			log.Printf("Error reverse geocoding location: %v", err)
+			// Continue with empty address - we still have coordinates
+		} else {
+			address = location.Address
+			log.Printf("Reverse geocoded address: %s", address)
+		}
+	}
+	
+	// Send a friendly confirmation message with the address
+	var confirmMsg string
+	if address != "" {
+		confirmMsg = fmt.Sprintf("📍 收到您的位置：%s\n\n正在為您查詢附近的垃圾車...", address)
+	} else {
+		confirmMsg = "📍 收到您的位置\n\n正在為您查詢附近的垃圾車..."
+	}
+	h.replyMessage(ctx, userID, confirmMsg)
+	
+	// Search for nearby garbage trucks
 	h.searchNearbyGarbageTrucks(ctx, userID, lat, lng, nil)
 }
 
@@ -142,10 +182,12 @@ func (h *Handler) handleCommand(ctx context.Context, userID, command string) {
 ❤️ 收藏地點：使用 /favorite 指令
 📋 查看收藏：使用 /list 指令
 
-範例：
-- 「台北市大安區忠孝東路」
-- 「我晚上七點前在哪裡倒垃圾？」
-- 直接分享位置`
+使用方式：
+📍 分享位置：點擊「+」→「位置」→「即時位置」
+💬 輸入地址：「台北市大安區忠孝東路」
+🕐 時間查詢：「我晚上七點前在哪裡倒垃圾？」
+
+系統會自動為您找到最近的垃圾車站點！`
 		h.replyMessage(ctx, userID, helpText)
 
 	case "/favorite":

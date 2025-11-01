@@ -47,10 +47,12 @@
 
 ### 1️⃣ 查詢流程
 1. LINE → webhook (`/line/callback`)
-2. 若傳送位置：解析 lat/lng；若傳送文字：透過 Gemini 辨識地址關鍵字。
-3. Google Geocoding → 正規化地址。
-4. 查詢 Garbage API（Yukaii 開源資料）找最近站點與 ETA。
-5. 回覆 LINE Flex Message（站點、時間、距離、導航連結）。
+2. **位置處理**：
+   - 若傳送位置：直接解析 lat/lng，若無地址則使用 Google Reverse Geocoding 取得地址
+   - 若傳送文字：透過 Gemini 辨識地址關鍵字，再使用 Google Geocoding 轉換座標
+3. 發送確認訊息給使用者（顯示收到的位置/地址）
+4. 查詢 Garbage API（Yukaii 開源資料）找最近站點與 ETA
+5. 回覆 LINE Flex Message（站點、時間、距離、導航連結）
 
 ### 2️⃣ 提醒流程
 1. 使用者設定提醒 → 儲存 Firestore。
