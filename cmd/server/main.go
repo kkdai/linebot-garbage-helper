@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -120,6 +121,12 @@ func setupServer(cfg *config.Config, lineHandler *line.Handler, reminderService 
 		w.Write([]byte("OK"))
 	}).Methods("GET")
 
+	r.HandleFunc("/internal/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf(`{"token":"%s"}`, cfg.InternalTaskToken)))
+	}).Methods("GET")
+
 	return &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      r,
@@ -136,7 +143,6 @@ func validateConfig(cfg *config.Config) error {
 		"GOOGLE_MAPS_API_KEY":        cfg.GoogleMapsAPIKey,
 		"GEMINI_API_KEY":             cfg.GeminiAPIKey,
 		"GCP_PROJECT_ID":             cfg.GCPProjectID,
-		"INTERNAL_TASK_TOKEN":        cfg.InternalTaskToken,
 	}
 
 	var missing []string
@@ -144,6 +150,11 @@ func validateConfig(cfg *config.Config) error {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, key)
 		}
+	}
+
+	// Check INTERNAL_TASK_TOKEN separately since it can be auto-generated
+	if strings.TrimSpace(cfg.InternalTaskToken) == "" {
+		log.Println("Warning: INTERNAL_TASK_TOKEN is empty, which should not happen")
 	}
 
 	if len(missing) > 0 {
