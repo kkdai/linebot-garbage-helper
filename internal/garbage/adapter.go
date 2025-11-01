@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"linebot-garbage-helper/internal/geo"
@@ -16,7 +18,38 @@ type GarbageAdapter struct {
 }
 
 type GarbageData struct {
-	Routes []Route `json:"routes"`
+	Result GarbageResult `json:"result"`
+}
+
+type GarbageResult struct {
+	Count   int               `json:"count"`
+	Limit   int               `json:"limit"`
+	Offset  int               `json:"offset"`
+	Sort    string            `json:"sort"`
+	Results []CollectionPoint `json:"results"`
+}
+
+type CollectionPoint struct {
+	ID          int         `json:"_id"`
+	ImportDate  ImportDate  `json:"_importdate"`
+	District    string      `json:"行政區"`
+	Neighborhood string     `json:"里別"`
+	Squad       string      `json:"分隊"`
+	StationCode string      `json:"局編"`
+	VehicleNumber string    `json:"車號"`
+	Route       string      `json:"路線"`
+	VehicleTrip string      `json:"車次"`
+	ArrivalTime string      `json:"抵達時間"`
+	DepartureTime string    `json:"離開時間"`
+	Location    string      `json:"地點"`
+	Longitude   string      `json:"經度"`
+	Latitude    string      `json:"緯度"`
+}
+
+type ImportDate struct {
+	Date         string `json:"date"`
+	TimezoneType int    `json:"timezone_type"`
+	Timezone     string `json:"timezone"`
 }
 
 type Route struct {
@@ -37,6 +70,7 @@ type NearestStop struct {
 	Route    Route
 	Distance float64
 	ETA      time.Time
+	CollectionPoint *CollectionPoint
 }
 
 func NewGarbageAdapter() *GarbageAdapter {
@@ -48,7 +82,7 @@ func NewGarbageAdapter() *GarbageAdapter {
 }
 
 func (ga *GarbageAdapter) FetchGarbageData(ctx context.Context) (*GarbageData, error) {
-	url := "https://raw.githubusercontent.com/Yukaii/garbage/main/garbage.json"
+	url := "https://raw.githubusercontent.com/Yukaii/garbage/data/trash-collection-points.json"
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -77,26 +111,42 @@ func (ga *GarbageAdapter) FindNearestStops(userLat, userLng float64, data *Garba
 	var nearestStops []*NearestStop
 	now := time.Now()
 	
-	for _, route := range data.Routes {
-		for _, stop := range route.Stops {
-			distance := geo.CalculateDistance(userLat, userLng, stop.Lat, stop.Lng)
-			
-			eta, err := parseTimeToToday(stop.Time)
-			if err != nil {
-				continue
-			}
-			
-			if eta.Before(now) {
-				eta = eta.Add(24 * time.Hour)
-			}
-			
-			nearestStops = append(nearestStops, &NearestStop{
-				Stop:     stop,
-				Route:    route,
-				Distance: distance,
-				ETA:      eta,
-			})
+	for _, point := range data.Result.Results {
+		lat, lng, err := ga.parseCoordinates(point.Latitude, point.Longitude)
+		if err != nil {
+			continue
 		}
+		
+		distance := geo.CalculateDistance(userLat, userLng, lat, lng)
+		
+		eta, err := parseTimeToToday(point.ArrivalTime)
+		if err != nil {
+			continue
+		}
+		
+		if eta.Before(now) {
+			eta = eta.Add(24 * time.Hour)
+		}
+		
+		stop := Stop{
+			Name: point.Location,
+			Lat:  lat,
+			Lng:  lng,
+			Time: point.ArrivalTime,
+		}
+		
+		route := Route{
+			ID:   point.VehicleNumber,
+			Name: point.Route,
+		}
+		
+		nearestStops = append(nearestStops, &NearestStop{
+			Stop:            stop,
+			Route:           route,
+			Distance:        distance,
+			ETA:             eta,
+			CollectionPoint: &point,
+		})
 	}
 	
 	sort.Slice(nearestStops, func(i, j int) bool {
@@ -113,34 +163,50 @@ func (ga *GarbageAdapter) FindNearestStops(userLat, userLng float64, data *Garba
 func (ga *GarbageAdapter) FindStopsInTimeWindow(userLat, userLng float64, data *GarbageData, timeWindow TimeWindow, maxDistance float64) ([]*NearestStop, error) {
 	var validStops []*NearestStop
 	
-	for _, route := range data.Routes {
-		for _, stop := range route.Stops {
-			distance := geo.CalculateDistance(userLat, userLng, stop.Lat, stop.Lng)
-			
-			if maxDistance > 0 && distance > maxDistance {
-				continue
-			}
-			
-			eta, err := parseTimeToToday(stop.Time)
-			if err != nil {
-				continue
-			}
-			
-			if eta.Before(time.Now()) {
-				eta = eta.Add(24 * time.Hour)
-			}
-			
-			if !isTimeInWindow(eta, timeWindow) {
-				continue
-			}
-			
-			validStops = append(validStops, &NearestStop{
-				Stop:     stop,
-				Route:    route,
-				Distance: distance,
-				ETA:      eta,
-			})
+	for _, point := range data.Result.Results {
+		lat, lng, err := ga.parseCoordinates(point.Latitude, point.Longitude)
+		if err != nil {
+			continue
 		}
+		
+		distance := geo.CalculateDistance(userLat, userLng, lat, lng)
+		
+		if maxDistance > 0 && distance > maxDistance {
+			continue
+		}
+		
+		eta, err := parseTimeToToday(point.ArrivalTime)
+		if err != nil {
+			continue
+		}
+		
+		if eta.Before(time.Now()) {
+			eta = eta.Add(24 * time.Hour)
+		}
+		
+		if !isTimeInWindow(eta, timeWindow) {
+			continue
+		}
+		
+		stop := Stop{
+			Name: point.Location,
+			Lat:  lat,
+			Lng:  lng,
+			Time: point.ArrivalTime,
+		}
+		
+		route := Route{
+			ID:   point.VehicleNumber,
+			Name: point.Route,
+		}
+		
+		validStops = append(validStops, &NearestStop{
+			Stop:            stop,
+			Route:           route,
+			Distance:        distance,
+			ETA:             eta,
+			CollectionPoint: &point,
+		})
 	}
 	
 	sort.Slice(validStops, func(i, j int) bool {
@@ -157,8 +223,17 @@ type TimeWindow struct {
 
 func parseTimeToToday(timeStr string) (time.Time, error) {
 	now := time.Now()
-	layout := "15:04"
 	
+	if len(timeStr) == 4 {
+		layout := "1504"
+		t, err := time.Parse(layout, timeStr)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location()), nil
+	}
+	
+	layout := "15:04"
 	t, err := time.Parse(layout, timeStr)
 	if err != nil {
 		return time.Time{}, err
@@ -183,10 +258,40 @@ func isTimeInWindow(t time.Time, window TimeWindow) bool {
 	return true
 }
 
+func (ga *GarbageAdapter) parseCoordinates(lat, lng string) (float64, float64, error) {
+	latFloat, err := strconv.ParseFloat(strings.TrimSpace(lat), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid latitude: %s", lat)
+	}
+	
+	lngFloat, err := strconv.ParseFloat(strings.TrimSpace(lng), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid longitude: %s", lng)
+	}
+	
+	return latFloat, lngFloat, nil
+}
+
 func (ga *GarbageAdapter) GetRouteByID(data *GarbageData, routeID string) *Route {
-	for _, route := range data.Routes {
-		if route.ID == routeID {
-			return &route
+	for _, point := range data.Result.Results {
+		if point.VehicleNumber == routeID {
+			lat, lng, err := ga.parseCoordinates(point.Latitude, point.Longitude)
+			if err != nil {
+				continue
+			}
+			
+			stop := Stop{
+				Name: point.Location,
+				Lat:  lat,
+				Lng:  lng,
+				Time: point.ArrivalTime,
+			}
+			
+			return &Route{
+				ID:    point.VehicleNumber,
+				Name:  point.Route,
+				Stops: []Stop{stop},
+			}
 		}
 	}
 	return nil
@@ -196,6 +301,15 @@ func (ga *GarbageAdapter) GetStopFromRoute(route *Route, stopName string) *Stop 
 	for _, stop := range route.Stops {
 		if stop.Name == stopName {
 			return &stop
+		}
+	}
+	return nil
+}
+
+func (ga *GarbageAdapter) GetCollectionPointByVehicleAndLocation(data *GarbageData, vehicleNumber, location string) *CollectionPoint {
+	for _, point := range data.Result.Results {
+		if point.VehicleNumber == vehicleNumber && point.Location == location {
+			return &point
 		}
 	}
 	return nil
