@@ -99,6 +99,7 @@
 | POST | `/tasks/dispatch-reminders` | 定期提醒推播 ✅ |
 | GET  | `/healthz` | 健康檢查 ✅ |
 | POST | `/internal/refresh-routes` | 更新 Garbage 路線資料 ✅ |
+| GET  | `/internal/token` | 取得自動生成的內部 API token ✅ |
 
 ---
 
@@ -112,7 +113,7 @@ GOOGLE_MAPS_API_KEY=xxxx
 GEMINI_API_KEY=xxxx
 GEMINI_MODEL=gemini-1.5-pro
 GCP_PROJECT_ID=your-project-id
-INTERNAL_TASK_TOKEN=randomstring
+# INTERNAL_TASK_TOKEN=randomstring  # 已改為自動生成，無需手動設定
 ```
 
 ---
@@ -156,7 +157,7 @@ routes/{routeId}
 ## 十、Dockerfile 範例 ✅
 
 ```dockerfile
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 RUN apk add --no-cache ca-certificates
 

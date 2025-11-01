@@ -57,8 +57,9 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
    _LINE_CHANNEL_ACCESS_TOKEN: your_line_channel_access_token
    _GOOGLE_MAPS_API_KEY: your_google_maps_api_key
    _GEMINI_API_KEY: your_gemini_api_key
-   _INTERNAL_TASK_TOKEN: your_random_secure_token
    ```
+   
+   ⚡ **注意**: `INTERNAL_TASK_TOKEN` 現在會自動生成，無需設定替代變數！
 
 ### 透過 gcloud CLI 設定
 
@@ -69,7 +70,7 @@ gcloud builds triggers create github \
     --repo-owner=your-github-username \
     --branch-pattern=main \
     --build-config=cloudbuild.yaml \
-    --substitutions="_LINE_CHANNEL_SECRET=your_secret,_LINE_CHANNEL_ACCESS_TOKEN=your_token,_GOOGLE_MAPS_API_KEY=your_key,_GEMINI_API_KEY=your_key,_INTERNAL_TASK_TOKEN=your_token" \
+    --substitutions="_LINE_CHANNEL_SECRET=your_secret,_LINE_CHANNEL_ACCESS_TOKEN=your_token,_GOOGLE_MAPS_API_KEY=your_key,_GEMINI_API_KEY=your_key" \
     --name=garbage-linebot-deploy
 ```
 
@@ -94,8 +95,8 @@ echo -n "your_maps_api_key" | gcloud secrets create google-maps-api-key --data-f
 # Gemini API Key
 echo -n "your_gemini_api_key" | gcloud secrets create gemini-api-key --data-file=-
 
-# Internal Task Token
-echo -n "your_random_token" | gcloud secrets create internal-task-token --data-file=-
+# Internal Task Token (可選，應用程式會自動生成)
+# echo -n "your_custom_token" | gcloud secrets create internal-task-token --data-file=-
 ```
 
 ### 3. 更新 cloudbuild.yaml 使用 Secret Manager
@@ -112,8 +113,9 @@ availableSecrets:
     env: 'GOOGLE_MAPS_API_KEY'
   - versionName: projects/$PROJECT_ID/secrets/gemini-api-key/versions/latest
     env: 'GEMINI_API_KEY'
-  - versionName: projects/$PROJECT_ID/secrets/internal-task-token/versions/latest
-    env: 'INTERNAL_TASK_TOKEN'
+  # Internal Task Token (可選，應用程式會自動生成)
+  # - versionName: projects/$PROJECT_ID/secrets/internal-task-token/versions/latest
+  #   env: 'INTERNAL_TASK_TOKEN'
 ```
 
 ## 部署流程
@@ -178,7 +180,7 @@ gcloud builds log [BUILD_ID]
 ### 常見問題
 
 1. **權限錯誤**: 確認 Cloud Build 服務帳戶有足夠權限
-2. **環境變數未設定**: 檢查觸發器的替代變數設定
+2. **環境變數未設定**: 檢查觸發器的替代變數設定 (注意: INTERNAL_TASK_TOKEN 現在會自動生成)
 3. **API 未啟用**: 確認所有必要的 GCP API 都已啟用
 4. **Firestore 權限**: 確認應用程式有 Firestore 讀寫權限
 

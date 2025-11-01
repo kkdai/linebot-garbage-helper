@@ -12,7 +12,7 @@
 
 ## 技術架構
 
-- **語言**: Go 1.23
+- **語言**: Go 1.24
 - **雲端平台**: Google Cloud Platform
 - **資料庫**: Firestore
 - **外部 API**: LINE Bot SDK, Google Maps API, Gemini API
@@ -21,6 +21,7 @@
 ## 環境變數設定
 
 ```bash
+# 必要環境變數
 PORT=8080
 LINE_CHANNEL_SECRET=your_line_channel_secret
 LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
@@ -28,7 +29,9 @@ GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-1.5-pro
 GCP_PROJECT_ID=your_gcp_project_id
-INTERNAL_TASK_TOKEN=your_random_token
+
+# 可選環境變數（如不提供將自動生成）
+# INTERNAL_TASK_TOKEN=your_custom_token
 ```
 
 ## 快速開始
@@ -89,8 +92,9 @@ INTERNAL_TASK_TOKEN=your_random_token
    _LINE_CHANNEL_ACCESS_TOKEN: your_line_channel_access_token
    _GOOGLE_MAPS_API_KEY: your_google_maps_api_key
    _GEMINI_API_KEY: your_gemini_api_key
-   _INTERNAL_TASK_TOKEN: your_random_secure_token
    ```
+   
+   ⚡ **注意**: `INTERNAL_TASK_TOKEN` 現在會自動生成，無需手動設定！
 
 4. **推送程式碼自動部署**
    ```bash
@@ -117,12 +121,16 @@ INTERNAL_TASK_TOKEN=your_random_token
    ```
 
 3. **設定 Cloud Scheduler**
+   應用程式部署後會自動設定 Cloud Scheduler。如需手動設定：
    ```bash
+   # 首先從部署的應用程式取得自動生成的 token
+   TOKEN=$(curl -s https://your-service-url/internal/token | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+   
    gcloud scheduler jobs create http reminder-dispatcher \
      --schedule="* * * * *" \
      --uri="https://your-service-url/tasks/dispatch-reminders" \
      --http-method=POST \
-     --headers="Authorization=Bearer your_internal_task_token"
+     --headers="Authorization=Bearer $TOKEN"
    ```
 
 詳細部署說明請參考 [DEPLOYMENT.md](./DEPLOYMENT.md)
@@ -134,6 +142,7 @@ INTERNAL_TASK_TOKEN=your_random_token
 | POST | `/line/callback` | LINE webhook 接收端點 |
 | POST | `/tasks/dispatch-reminders` | 提醒推播任務 |
 | GET | `/healthz` | 健康檢查 |
+| GET | `/internal/token` | 取得內部 API token |
 | POST | `/internal/refresh-routes` | 更新垃圾車路線資料 |
 
 ## LINE Bot 指令

@@ -121,9 +121,9 @@ func (fc *FirestoreClient) CreateReminder(ctx context.Context, reminder *Reminde
 }
 
 func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime time.Time) ([]*Reminder, error) {
+	// Use single field query to avoid index requirement
 	query := fc.client.Collection("reminders").
-		Where("status", "==", "active").
-		Where("eta", "<=", targetTime)
+		Where("status", "==", "active")
 	
 	docs, err := query.Documents(ctx).GetAll()
 	if err != nil {
@@ -137,7 +137,11 @@ func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime ti
 			continue
 		}
 		reminder.ID = doc.Ref.ID
-		reminders = append(reminders, &reminder)
+		
+		// Filter by ETA in application code
+		if reminder.ETA.Before(targetTime) || reminder.ETA.Equal(targetTime) {
+			reminders = append(reminders, &reminder)
+		}
 	}
 	
 	return reminders, nil
