@@ -50,6 +50,8 @@ func NewHandler(
 }
 
 func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received webhook request from %s", r.RemoteAddr)
+	
 	cb, err := webhook.ParseRequest(h.channelSecret, r)
 	if err != nil {
 		log.Printf("Cannot parse request: %v", err)
@@ -57,37 +59,59 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, event := range cb.Events {
+	log.Printf("Successfully parsed webhook, processing %d events", len(cb.Events))
+
+	for i, event := range cb.Events {
+		log.Printf("Processing event %d/%d, type: %T", i+1, len(cb.Events), event)
+		
 		switch e := event.(type) {
 		case webhook.MessageEvent:
+			log.Printf("Handling MessageEvent")
 			h.handleMessageEvent(r.Context(), e)
 		case webhook.PostbackEvent:
+			log.Printf("Handling PostbackEvent")
 			h.handlePostbackEvent(r.Context(), e)
+		default:
+			log.Printf("Unhandled event type: %T", event)
 		}
 	}
 
+	log.Printf("Webhook processing completed successfully")
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) handleMessageEvent(ctx context.Context, event webhook.MessageEvent) {
+	log.Printf("Processing MessageEvent")
+	
 	var userID string
 	switch source := event.Source.(type) {
 	case *webhook.UserSource:
 		userID = source.UserId
+		log.Printf("User ID: %s", userID)
 	default:
+		log.Printf("Non-user source, ignoring event. Source type: %T", event.Source)
 		return
 	}
 
+	log.Printf("Message type: %T", event.Message)
+	
 	switch message := event.Message.(type) {
 	case webhook.TextMessageContent:
+		log.Printf("Text message received: %s", message.Text)
 		h.handleTextMessage(ctx, userID, message.Text)
 	case webhook.LocationMessageContent:
+		log.Printf("Location message received: lat=%f, lng=%f, address=%s", message.Latitude, message.Longitude, message.Address)
 		h.handleLocationMessage(ctx, userID, message.Latitude, message.Longitude, message.Address)
+	default:
+		log.Printf("Unhandled message type: %T", event.Message)
 	}
 }
 
 func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
+	log.Printf("Processing text message from user %s: %s", userID, text)
+	
 	if strings.HasPrefix(text, "/") {
+		log.Printf("Command detected: %s", text)
 		h.handleCommand(ctx, userID, text)
 		return
 	}
@@ -95,6 +119,7 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 	// Handle common greetings
 	lowerText := strings.ToLower(strings.TrimSpace(text))
 	if lowerText == "hi" || lowerText == "hello" || lowerText == "你好" || lowerText == "哈囉" {
+		log.Printf("Greeting detected: %s", text)
 		welcomeMsg := `👋 您好！歡迎使用垃圾車助手！
 
 🚀 快速開始：
@@ -108,34 +133,44 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 		return
 	}
 
+	log.Printf("Analyzing intent for text: %s", text)
 	intent, err := h.geminiClient.AnalyzeIntent(ctx, text)
 	if err != nil {
-		log.Printf("Error analyzing intent: %v", err)
+		log.Printf("Error analyzing intent for user %s: %v", userID, err)
 		h.replyMessage(ctx, userID, "抱歉，我無法理解您的訊息。\n\n💡 您可以：\n📍 分享您的位置\n💬 輸入地址\n❓ 輸入 /help 查看使用說明")
 		return
 	}
+	
+	log.Printf("Intent analysis result: %+v", intent)
 
 	if intent.District != "" {
+		log.Printf("Geocoding district: %s", intent.District)
 		location, err := h.geoClient.GeocodeAddress(ctx, intent.District)
 		if err != nil {
-			log.Printf("Error geocoding address: %v", err)
+			log.Printf("Error geocoding address '%s' for user %s: %v", intent.District, userID, err)
 			h.replyMessage(ctx, userID, "抱歉，我找不到這個地址的位置資訊。")
 			return
 		}
+		log.Printf("Geocoded successfully: %+v", location)
 		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 	} else {
+		log.Printf("Extracting location from text: %s", text)
 		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
 		if err != nil || extractedLocation == "" {
+			log.Printf("Failed to extract location from text '%s' for user %s: %v", text, userID, err)
 			h.replyMessage(ctx, userID, "請提供具體的地址或分享您的位置，我幫您查詢附近的垃圾車。")
 			return
 		}
+		
+		log.Printf("Extracted location: %s", extractedLocation)
 
 		location, err := h.geoClient.GeocodeAddress(ctx, extractedLocation)
 		if err != nil {
-			log.Printf("Error geocoding extracted location: %v", err)
+			log.Printf("Error geocoding extracted location '%s' for user %s: %v", extractedLocation, userID, err)
 			h.replyMessage(ctx, userID, "抱歉，我找不到這個地址的位置資訊。")
 			return
 		}
+		log.Printf("Geocoded extracted location successfully: %+v", location)
 		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 	}
 }
@@ -208,42 +243,58 @@ func (h *Handler) handleCommand(ctx context.Context, userID, command string) {
 }
 
 func (h *Handler) searchNearbyGarbageTrucks(ctx context.Context, userID string, lat, lng float64, intent *gemini.IntentResult) {
+	log.Printf("Searching nearby garbage trucks for user %s at coordinates: lat=%f, lng=%f", userID, lat, lng)
+	
 	garbageData, err := h.garbageAdapter.FetchGarbageData(ctx)
 	if err != nil {
-		log.Printf("Error fetching garbage data: %v", err)
+		log.Printf("Error fetching garbage data for user %s: %v", userID, err)
 		h.replyMessage(ctx, userID, "抱歉，無法取得垃圾車資料。")
 		return
 	}
+	
+	log.Printf("Successfully fetched garbage data, %d collection points available", len(garbageData.Result.Results))
 
 	var nearestStops []*garbage.NearestStop
 
 	if intent != nil && (intent.TimeWindow.From != "" || intent.TimeWindow.To != "") {
+		log.Printf("Time window query detected: from=%s, to=%s", intent.TimeWindow.From, intent.TimeWindow.To)
 		fromTime, toTime, err := h.geminiClient.ParseTimeWindow(intent.TimeWindow)
 		if err == nil {
+			log.Printf("Parsed time window: from=%v, to=%v", fromTime, toTime)
 			timeWindow := garbage.TimeWindow{From: fromTime, To: toTime}
 			nearestStops, err = h.garbageAdapter.FindStopsInTimeWindow(lat, lng, garbageData, timeWindow, 2000)
+			log.Printf("Found %d stops in time window", len(nearestStops))
+		} else {
+			log.Printf("Error parsing time window: %v", err)
 		}
 	}
 
 	if len(nearestStops) == 0 {
+		log.Printf("No stops found in time window, searching for nearest stops")
 		nearestStops, err = h.garbageAdapter.FindNearestStops(lat, lng, garbageData, 5)
 		if err != nil {
-			log.Printf("Error finding nearest stops: %v", err)
+			log.Printf("Error finding nearest stops for user %s: %v", userID, err)
 			h.replyMessage(ctx, userID, "抱歉，無法找到附近的垃圾車站點。")
 			return
 		}
+		log.Printf("Found %d nearest stops", len(nearestStops))
 	}
 
 	if len(nearestStops) == 0 {
+		log.Printf("No garbage truck stops found for user %s at coordinates lat=%f, lng=%f", userID, lat, lng)
 		h.replyMessage(ctx, userID, "附近沒有找到垃圾車站點。")
 		return
 	}
 
+	log.Printf("Sending %d garbage truck results to user %s", len(nearestStops), userID)
 	h.sendGarbageTruckResults(ctx, userID, nearestStops)
 }
 
 func (h *Handler) sendGarbageTruckResults(ctx context.Context, userID string, stops []*garbage.NearestStop) {
+	log.Printf("Preparing to send garbage truck results to user %s", userID)
+	
 	if len(stops) == 0 {
+		log.Printf("No stops to send to user %s", userID)
 		return
 	}
 
@@ -251,13 +302,17 @@ func (h *Handler) sendGarbageTruckResults(ctx context.Context, userID string, st
 
 	for i, stop := range stops {
 		if i >= 3 {
+			log.Printf("Limiting results to first 3 stops")
 			break
 		}
 
+		log.Printf("Creating bubble for stop %d: %s", i+1, stop.Stop.Name)
 		bubble := h.createGarbageTruckBubble(stop)
 		bubbles = append(bubbles, bubble)
 	}
 
+	log.Printf("Created %d bubbles for user %s", len(bubbles), userID)
+	
 	carousel := messaging_api.FlexCarousel{
 		Contents: bubbles,
 	}
@@ -267,6 +322,7 @@ func (h *Handler) sendGarbageTruckResults(ctx context.Context, userID string, st
 		Contents: &carousel,
 	}
 
+	log.Printf("Sending flex message with %d bubbles to user %s", len(bubbles), userID)
 	h.sendMessage(ctx, userID, &flexMessage)
 }
 
@@ -414,6 +470,7 @@ func (h *Handler) listFavorites(ctx context.Context, userID string) {
 }
 
 func (h *Handler) replyMessage(ctx context.Context, userID, text string) {
+	log.Printf("Sending reply to user %s: %s", userID, text)
 	message := messaging_api.TextMessage{
 		Text: text,
 	}
@@ -421,15 +478,21 @@ func (h *Handler) replyMessage(ctx context.Context, userID, text string) {
 }
 
 func (h *Handler) sendMessage(ctx context.Context, userID string, message messaging_api.MessageInterface) {
+	log.Printf("Attempting to send message to user: %s", userID)
+	
 	req := &messaging_api.PushMessageRequest{
 		To:       userID,
 		Messages: []messaging_api.MessageInterface{message},
 	}
 
-	_, err := h.messagingAPI.PushMessage(req, "")
+	log.Printf("Calling LINE Messaging API...")
+	resp, err := h.messagingAPI.PushMessage(req, "")
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
+		log.Printf("Error sending message to user %s: %v", userID, err)
+		return
 	}
+	
+	log.Printf("Message sent successfully to user %s. Response: %+v", userID, resp)
 }
 
 func (h *Handler) GetMessagingAPI() *messaging_api.MessagingApiAPI {

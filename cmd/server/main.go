@@ -85,6 +85,14 @@ func main() {
 func setupServer(cfg *config.Config, lineHandler *line.Handler, reminderService *reminder.ReminderService) *http.Server {
 	r := mux.NewRouter()
 
+	// Add middleware to log all requests
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	r.HandleFunc("/line/callback", lineHandler.HandleWebhook).Methods("POST")
 
 	r.HandleFunc("/tasks/dispatch-reminders", func(w http.ResponseWriter, r *http.Request) {
