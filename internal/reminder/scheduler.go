@@ -45,9 +45,14 @@ func (s *Scheduler) ProcessReminders(ctx context.Context) error {
 		return fmt.Errorf("failed to get active reminders: %w", err)
 	}
 
-	log.Printf("Found %d active reminders to process", len(reminders))
+	log.Printf("Found %d active reminders to process at %s", len(reminders), now.Format("2006-01-02 15:04:05"))
 
 	for _, reminder := range reminders {
+		notificationTime := reminder.ETA.Add(-time.Duration(reminder.AdvanceMinutes) * time.Minute)
+		log.Printf("Processing reminder %s: ETA=%s, NotificationTime=%s, AdvanceMinutes=%d", 
+			reminder.ID, reminder.ETA.Format("2006-01-02 15:04:05"), 
+			notificationTime.Format("2006-01-02 15:04:05"), reminder.AdvanceMinutes)
+		
 		if err := s.processReminder(ctx, reminder); err != nil {
 			log.Printf("Error processing reminder %s: %v", reminder.ID, err)
 			continue
@@ -62,11 +67,16 @@ func (s *Scheduler) processReminder(ctx context.Context, reminder *store.Reminde
 	
 	notificationTime := reminder.ETA.Add(-time.Duration(reminder.AdvanceMinutes) * time.Minute)
 	
+	log.Printf("Reminder %s evaluation: now=%s, notificationTime=%s, ETA=%s", 
+		reminder.ID, now.Format("15:04:05"), notificationTime.Format("15:04:05"), reminder.ETA.Format("15:04:05"))
+	
 	if now.Before(notificationTime) {
+		log.Printf("Reminder %s: Too early to send notification (current time before notification time)", reminder.ID)
 		return nil
 	}
 
 	if now.After(reminder.ETA) {
+		log.Printf("Reminder %s: ETA has passed, marking as expired", reminder.ID)
 		err := s.store.UpdateReminderStatus(ctx, reminder.ID, "expired")
 		if err != nil {
 			log.Printf("Failed to update expired reminder status: %v", err)
@@ -74,6 +84,7 @@ func (s *Scheduler) processReminder(ctx context.Context, reminder *store.Reminde
 		return nil
 	}
 
+	log.Printf("Reminder %s: Sending notification to user %s for stop %s", reminder.ID, reminder.UserID, reminder.StopName)
 	err := s.sendReminderNotification(ctx, reminder)
 	if err != nil {
 		return fmt.Errorf("failed to send reminder notification: %w", err)

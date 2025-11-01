@@ -138,8 +138,9 @@ func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime ti
 		}
 		reminder.ID = doc.Ref.ID
 		
-		// Filter by ETA in application code
-		if reminder.ETA.Before(targetTime) || reminder.ETA.Equal(targetTime) {
+		// Filter by ETA: should be after targetTime (future reminders)
+		// We want reminders where ETA > now and notification time <= now
+		if reminder.ETA.After(targetTime) {
 			reminders = append(reminders, &reminder)
 		}
 	}

@@ -80,28 +80,54 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (h *Handler) getUserID(source webhook.SourceInterface) string {
+	switch s := source.(type) {
+	case *webhook.UserSource:
+		log.Printf("User source detected, User ID: %s", s.UserId)
+		return s.UserId
+	case *webhook.GroupSource:
+		log.Printf("Group source detected, Group ID: %s", s.GroupId)
+		// For group messages, we could potentially handle them differently
+		// For now, we ignore group messages
+		return ""
+	case *webhook.RoomSource:
+		log.Printf("Room source detected, Room ID: %s", s.RoomId)
+		// For room messages, we could potentially handle them differently
+		// For now, we ignore room messages
+		return ""
+	default:
+		log.Printf("Unknown source type: %T", source)
+		return ""
+	}
+}
+
 func (h *Handler) handleMessageEvent(ctx context.Context, event webhook.MessageEvent) {
 	log.Printf("Processing MessageEvent")
-	
-	var userID string
-	switch source := event.Source.(type) {
-	case *webhook.UserSource:
-		userID = source.UserId
-		log.Printf("User ID: %s", userID)
-	default:
-		log.Printf("Non-user source, ignoring event. Source type: %T", event.Source)
-		return
-	}
-
 	log.Printf("Message type: %T", event.Message)
+	log.Printf("Source type: %T", event.Source)
 	
+	// First check if we can handle this message type
 	switch message := event.Message.(type) {
 	case webhook.TextMessageContent:
 		log.Printf("Text message received: %s", message.Text)
+		// Now get the user ID for text messages
+		userID := h.getUserID(event.Source)
+		if userID == "" {
+			log.Printf("Cannot get user ID from source type %T, ignoring text message", event.Source)
+			return
+		}
 		h.handleTextMessage(ctx, userID, message.Text)
+		
 	case webhook.LocationMessageContent:
 		log.Printf("Location message received: lat=%f, lng=%f, address=%s", message.Latitude, message.Longitude, message.Address)
+		// Now get the user ID for location messages
+		userID := h.getUserID(event.Source)
+		if userID == "" {
+			log.Printf("Cannot get user ID from source type %T, ignoring location message", event.Source)
+			return
+		}
 		h.handleLocationMessage(ctx, userID, message.Latitude, message.Longitude, message.Address)
+		
 	default:
 		log.Printf("Unhandled message type: %T", event.Message)
 	}
@@ -384,11 +410,13 @@ func (h *Handler) createGarbageTruckBubble(stop *garbage.NearestStop) messaging_
 }
 
 func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.PostbackEvent) {
-	var userID string
-	switch source := event.Source.(type) {
-	case *webhook.UserSource:
-		userID = source.UserId
-	default:
+	log.Printf("Processing PostbackEvent")
+	log.Printf("Source type: %T", event.Source)
+	log.Printf("Postback data: %s", event.Postback.Data)
+	
+	userID := h.getUserID(event.Source)
+	if userID == "" {
+		log.Printf("Cannot get user ID from source type %T, ignoring postback event", event.Source)
 		return
 	}
 
@@ -405,11 +433,17 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 			return
 		}
 
+		etaTime := time.Unix(eta, 0)
+		notificationTime := etaTime.Add(-10 * time.Minute)
+		
+		log.Printf("Creating reminder for user %s: stop=%s, ETA=%s, notificationTime=%s", 
+			userID, stopName, etaTime.Format("2006-01-02 15:04:05"), notificationTime.Format("2006-01-02 15:04:05"))
+		
 		reminder := &store.Reminder{
 			UserID:         userID,
 			StopName:       stopName,
 			RouteID:        routeID,
-			ETA:            time.Unix(eta, 0),
+			ETA:            etaTime,
 			AdvanceMinutes: 10,
 		}
 
@@ -420,6 +454,7 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 			return
 		}
 
+		log.Printf("Successfully created reminder for user %s, will notify at %s", userID, notificationTime.Format("2006-01-02 15:04:05"))
 		h.replyMessage(ctx, userID, fmt.Sprintf("✅ 已設定提醒！\n將在垃圾車抵達 %s 前 10 分鐘通知您。", stopName))
 	}
 }
