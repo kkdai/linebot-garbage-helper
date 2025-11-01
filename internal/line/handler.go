@@ -82,15 +82,15 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getUserID(source webhook.SourceInterface) string {
 	switch s := source.(type) {
-	case *webhook.UserSource:
+	case webhook.UserSource:
 		log.Printf("User source detected, User ID: %s", s.UserId)
 		return s.UserId
-	case *webhook.GroupSource:
+	case webhook.GroupSource:
 		log.Printf("Group source detected, Group ID: %s", s.GroupId)
 		// For group messages, we could potentially handle them differently
 		// For now, we ignore group messages
 		return ""
-	case *webhook.RoomSource:
+	case webhook.RoomSource:
 		log.Printf("Room source detected, Room ID: %s", s.RoomId)
 		// For room messages, we could potentially handle them differently
 		// For now, we ignore room messages
