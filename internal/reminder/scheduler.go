@@ -39,7 +39,19 @@ func (rs *ReminderService) ProcessReminders(ctx context.Context) error {
 
 func (s *Scheduler) ProcessReminders(ctx context.Context) error {
 	now := time.Now()
-	
+
+	// Early return optimization: check if there are any active reminders first
+	count, err := s.store.CountActiveReminders(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to count active reminders: %v", err)
+		// Continue with normal processing as fallback
+	} else if count == 0 {
+		log.Printf("No active reminders, skipping processing")
+		return nil
+	} else {
+		log.Printf("Found %d active reminders in database", count)
+	}
+
 	reminders, err := s.store.GetActiveReminders(ctx, now)
 	if err != nil {
 		return fmt.Errorf("failed to get active reminders: %w", err)
@@ -49,10 +61,10 @@ func (s *Scheduler) ProcessReminders(ctx context.Context) error {
 
 	for _, reminder := range reminders {
 		notificationTime := reminder.ETA.Add(-time.Duration(reminder.AdvanceMinutes) * time.Minute)
-		log.Printf("Processing reminder %s: ETA=%s, NotificationTime=%s, AdvanceMinutes=%d", 
-			reminder.ID, reminder.ETA.Format("2006-01-02 15:04:05"), 
+		log.Printf("Processing reminder %s: ETA=%s, NotificationTime=%s, AdvanceMinutes=%d",
+			reminder.ID, reminder.ETA.Format("2006-01-02 15:04:05"),
 			notificationTime.Format("2006-01-02 15:04:05"), reminder.AdvanceMinutes)
-		
+
 		if err := s.processReminder(ctx, reminder); err != nil {
 			log.Printf("Error processing reminder %s: %v", reminder.ID, err)
 			continue

@@ -120,16 +120,29 @@ func (fc *FirestoreClient) CreateReminder(ctx context.Context, reminder *Reminde
 	return err
 }
 
+func (fc *FirestoreClient) CountActiveReminders(ctx context.Context) (int, error) {
+	// Use count aggregation query (more efficient than reading all documents)
+	query := fc.client.Collection("reminders").
+		Where("status", "==", "active")
+
+	count, err := query.Count().Get(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(count.Count), nil
+}
+
 func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime time.Time) ([]*Reminder, error) {
 	// Use single field query to avoid index requirement
 	query := fc.client.Collection("reminders").
 		Where("status", "==", "active")
-	
+
 	docs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var reminders []*Reminder
 	for _, doc := range docs {
 		var reminder Reminder
@@ -137,14 +150,14 @@ func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime ti
 			continue
 		}
 		reminder.ID = doc.Ref.ID
-		
+
 		// Filter by ETA: should be after targetTime (future reminders)
 		// We want reminders where ETA > now and notification time <= now
 		if reminder.ETA.After(targetTime) {
 			reminders = append(reminders, &reminder)
 		}
 	}
-	
+
 	return reminders, nil
 }
 

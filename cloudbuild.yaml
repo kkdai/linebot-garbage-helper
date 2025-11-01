@@ -81,7 +81,7 @@ steps:
           echo "Updating existing scheduler job..."
           gcloud scheduler jobs update http reminder-dispatcher \
             --location=asia-east1 \
-            --schedule="* * * * *" \
+            --schedule="*/5 * * * *" \
             --uri="$${SERVICE_URL}/tasks/dispatch-reminders" \
             --http-method=POST \
             --headers="Authorization=Bearer $TOKEN"
@@ -89,7 +89,7 @@ steps:
           echo "Creating new scheduler job..."
           gcloud scheduler jobs create http reminder-dispatcher \
             --location=asia-east1 \
-            --schedule="* * * * *" \
+            --schedule="*/5 * * * *" \
             --uri="$${SERVICE_URL}/tasks/dispatch-reminders" \
             --http-method=POST \
             --headers="Authorization=Bearer $TOKEN"
