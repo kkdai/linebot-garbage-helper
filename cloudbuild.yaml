@@ -1,0 +1,84 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/garbage-linebot:$COMMIT_SHA', '.']
+    
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/garbage-linebot:$COMMIT_SHA']
+    
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'garbage-linebot'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/garbage-linebot:$COMMIT_SHA'
+      - '--region'
+      - 'asia-east1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--set-env-vars'
+      - 'PORT=8080'
+      - '--set-env-vars'
+      - 'LINE_CHANNEL_SECRET=${_LINE_CHANNEL_SECRET}'
+      - '--set-env-vars'
+      - 'LINE_CHANNEL_ACCESS_TOKEN=${_LINE_CHANNEL_ACCESS_TOKEN}'
+      - '--set-env-vars'
+      - 'GOOGLE_MAPS_API_KEY=${_GOOGLE_MAPS_API_KEY}'
+      - '--set-env-vars'
+      - 'GEMINI_API_KEY=${_GEMINI_API_KEY}'
+      - '--set-env-vars'
+      - 'GEMINI_MODEL=gemini-1.5-pro'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID'
+      - '--set-env-vars'
+      - 'INTERNAL_TASK_TOKEN=${_INTERNAL_TASK_TOKEN}'
+
+  # Create or update Cloud Scheduler job for reminders
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        # Get the service URL
+        SERVICE_URL=$(gcloud run services describe garbage-linebot --region=asia-east1 --format='value(status.url)')
+        
+        # Check if scheduler job exists
+        if gcloud scheduler jobs describe reminder-dispatcher --location=asia-east1 >/dev/null 2>&1; then
+          echo "Updating existing scheduler job..."
+          gcloud scheduler jobs update http reminder-dispatcher \
+            --location=asia-east1 \
+            --schedule="* * * * *" \
+            --uri="$${SERVICE_URL}/tasks/dispatch-reminders" \
+            --http-method=POST \
+            --headers="Authorization=Bearer ${_INTERNAL_TASK_TOKEN}"
+        else
+          echo "Creating new scheduler job..."
+          gcloud scheduler jobs create http reminder-dispatcher \
+            --location=asia-east1 \
+            --schedule="* * * * *" \
+            --uri="$${SERVICE_URL}/tasks/dispatch-reminders" \
+            --http-method=POST \
+            --headers="Authorization=Bearer ${_INTERNAL_TASK_TOKEN}"
+        fi
+
+images:
+  - 'gcr.io/$PROJECT_ID/garbage-linebot:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+timeout: '1200s'
