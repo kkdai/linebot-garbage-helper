@@ -180,6 +180,22 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 		log.Printf("Geocoded successfully: %+v", location)
 		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 	} else {
+		// 首先檢查是否是收藏地點名稱
+		favorite := h.findUserFavoriteByName(ctx, userID, text)
+		if favorite != nil {
+			log.Printf("Found favorite location '%s' for user %s: lat=%f, lng=%f", text, userID, favorite.Lat, favorite.Lng)
+			h.searchNearbyGarbageTrucks(ctx, userID, favorite.Lat, favorite.Lng, intent)
+			return
+		}
+		
+		// 檢查是否有時間窗口查詢但沒有地址
+		if intent != nil && (intent.TimeWindow.From != "" || intent.TimeWindow.To != "") {
+			log.Printf("Time window query detected without specific location: %s", text)
+			// 提示用戶需要提供位置資訊或使用收藏地點
+			h.handleTimeQueryWithoutLocation(ctx, userID, intent)
+			return
+		}
+		
 		log.Printf("Extracting location from text: %s", text)
 		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
 		if err != nil || extractedLocation == "" {
@@ -198,6 +214,50 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 		}
 		log.Printf("Geocoded extracted location successfully: %+v", location)
 		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
+	}
+}
+
+func (h *Handler) handleTimeQueryWithoutLocation(ctx context.Context, userID string, intent *gemini.IntentResult) {
+	fromTime, toTime, err := h.geminiClient.ParseTimeWindow(intent.TimeWindow)
+	if err != nil {
+		log.Printf("Error parsing time window: %v", err)
+		h.replyMessage(ctx, userID, "抱歉，無法理解您指定的時間。")
+		return
+	}
+
+	var timeDesc string
+	if !toTime.IsZero() {
+		timeDesc = fmt.Sprintf("%s前", toTime.Format("15:04"))
+	} else if !fromTime.IsZero() {
+		timeDesc = fmt.Sprintf("%s後", fromTime.Format("15:04"))
+	} else {
+		timeDesc = "指定時間內"
+	}
+
+	// 檢查用戶是否有收藏地點
+	user, err := h.store.GetUser(ctx, userID)
+	if err == nil && len(user.Favorites) > 0 {
+		// 用戶有收藏地點，提供選項
+		message := fmt.Sprintf("🕐 您想查詢%s的垃圾車資訊\n\n您可以：\n", timeDesc)
+		message += "📍 分享您的即時位置\n"
+		message += "❤️ 選擇收藏地點：\n"
+		
+		for i, fav := range user.Favorites {
+			if i >= 3 { // 限制顯示前3個收藏
+				break
+			}
+			message += fmt.Sprintf("• %s\n", fav.Name)
+		}
+		message += "\n請分享位置或輸入收藏地點名稱"
+		h.replyMessage(ctx, userID, message)
+	} else {
+		// 用戶沒有收藏地點
+		message := fmt.Sprintf("🕐 您想查詢%s的垃圾車資訊\n\n", timeDesc)
+		message += "請提供位置資訊：\n"
+		message += "📍 分享您的即時位置，或\n"
+		message += "💬 輸入具體地址\n\n"
+		message += "💡 您也可以使用 `/favorite 家 台北市大安區xxx` 來收藏常用地點"
+		h.replyMessage(ctx, userID, message)
 	}
 }
 
@@ -457,6 +517,25 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 		log.Printf("Successfully created reminder for user %s, will notify at %s", userID, notificationTime.Format("2006-01-02 15:04:05"))
 		h.replyMessage(ctx, userID, fmt.Sprintf("✅ 已設定提醒！\n將在垃圾車抵達 %s 前 10 分鐘通知您。", stopName))
 	}
+}
+
+func (h *Handler) findUserFavoriteByName(ctx context.Context, userID, name string) *store.Favorite {
+	user, err := h.store.GetUser(ctx, userID)
+	if err != nil {
+		log.Printf("Error getting user %s: %v", userID, err)
+		return nil
+	}
+
+	// 進行模糊匹配收藏地點名稱
+	lowerName := strings.ToLower(strings.TrimSpace(name))
+	for _, fav := range user.Favorites {
+		lowerFavName := strings.ToLower(strings.TrimSpace(fav.Name))
+		// 完全匹配或包含匹配
+		if lowerFavName == lowerName || strings.Contains(lowerFavName, lowerName) || strings.Contains(lowerName, lowerFavName) {
+			return &fav
+		}
+	}
+	return nil
 }
 
 func (h *Handler) addFavorite(ctx context.Context, userID, name, address string) {

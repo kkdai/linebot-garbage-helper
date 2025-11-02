@@ -74,6 +74,30 @@ func (gc *GeminiClient) AnalyzeIntent(ctx context.Context, userMessage string) (
   "query_type": "garbage_truck_eta"
 }
 
+輸入：「我晚上七點前在哪裡倒垃圾？」
+輸出：
+{
+  "district": "",
+  "time_window": {
+    "from": "",
+    "to": "19:00"
+  },
+  "keywords": ["倒垃圾", "晚上", "七點", "哪裡"],
+  "query_type": "garbage_truck_eta"
+}
+
+輸入：「家」
+輸出：
+{
+  "district": "",
+  "time_window": {
+    "from": "",
+    "to": ""
+  },
+  "keywords": ["家"],
+  "query_type": "favorite_location"
+}
+
 請分析以下使用者輸入：
 「%s」
 

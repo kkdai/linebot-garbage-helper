@@ -121,16 +121,16 @@ func (fc *FirestoreClient) CreateReminder(ctx context.Context, reminder *Reminde
 }
 
 func (fc *FirestoreClient) CountActiveReminders(ctx context.Context) (int, error) {
-	// Use count aggregation query (more efficient than reading all documents)
+	// Use simple query count (fallback for older Firestore SDK)
 	query := fc.client.Collection("reminders").
 		Where("status", "==", "active")
 
-	count, err := query.Count().Get(ctx)
+	docs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return 0, err
 	}
 
-	return int(count.Count), nil
+	return len(docs), nil
 }
 
 func (fc *FirestoreClient) GetActiveReminders(ctx context.Context, targetTime time.Time) ([]*Reminder, error) {
