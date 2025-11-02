@@ -5,7 +5,7 @@
 ## 功能特色
 
 - 🗑️ **即時查詢垃圾車** - 輸入地址或分享位置即可查詢附近垃圾車站點
-- ⏰ **提醒通知** - 可設定垃圾車抵達前提醒
+- ⏰ **智慧提醒系統** - 可設定垃圾車抵達前 N 分鐘提醒，自動推播通知
 - ❤️ **收藏地點** - 儲存常用地點（家、公司）
 - 🤖 **自然語言查詢** - 支援「我晚上七點前在哪裡倒垃圾？」等自然語言
 - 🗺️ **地圖導航** - 提供 Google Maps 導航連結
@@ -122,16 +122,42 @@ GCP_PROJECT_ID=your_gcp_project_id
 
 3. **設定 Cloud Scheduler**
    應用程式部署後會自動設定 Cloud Scheduler。如需手動設定：
-   ```bash
-   # 首先從部署的應用程式取得自動生成的 token
-   TOKEN=$(curl -s https://your-service-url/internal/token | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
    
+   ### 自動部署設定（推薦）
+   透過 Cloud Build 觸發器部署會自動建立 Cloud Scheduler。
+   
+   ### 手動設定（適用於 Cloud Run 直接連接 GitHub 部署）
+   ```bash
+   # 1. 啟用必要的 API
+   gcloud services enable cloudscheduler.googleapis.com
+   
+   # 2. 取得服務 URL
+   SERVICE_URL=$(gcloud run services describe garbage-linebot --region=asia-east1 --format='value(status.url)')
+   
+   # 3. 取得內部 API token
+   TOKEN=$(curl -s "${SERVICE_URL}/internal/token" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+   
+   # 4. 建立 Cloud Scheduler 工作
    gcloud scheduler jobs create http reminder-dispatcher \
-     --schedule="* * * * *" \
-     --uri="https://your-service-url/tasks/dispatch-reminders" \
+     --location=asia-east1 \
+     --schedule="*/5 * * * *" \
+     --uri="${SERVICE_URL}/tasks/dispatch-reminders" \
      --http-method=POST \
-     --headers="Authorization=Bearer $TOKEN"
+     --headers="Authorization=Bearer $TOKEN" \
+     --description="Garbage truck reminder dispatcher"
+   
+   # 5. 驗證設定
+   gcloud scheduler jobs list --location=asia-east1
+   
+   # 6. 測試執行
+   gcloud scheduler jobs run reminder-dispatcher --location=asia-east1
    ```
+   
+   ### ⚠️ 重要注意事項
+   - **區域一致性**：確保 Cloud Scheduler 和 Cloud Run 在同一區域 (`asia-east1`)
+   - **Token 有效性**：應用程式重新部署時，token 可能會改變，需要重新取得並更新 scheduler
+   - **權限檢查**：確認 GCP 帳戶有 Cloud Scheduler 的建立權限
+   - **雙重保障**：本地排程器會自動運作，Cloud Scheduler 提供額外可靠性保障
 
 詳細部署說明請參考 [DEPLOYMENT.md](./DEPLOYMENT.md)
 
@@ -157,6 +183,35 @@ GCP_PROJECT_ID=your_gcp_project_id
 - `/favorite [名稱] [地址]` - 收藏地點
 - `/list` - 查看收藏清單
 - `你好` / `hello` - 歡迎訊息和快速開始指南
+
+## 📅 提醒排程系統
+
+### 核心功能
+- **自動排程檢查**: 每分鐘掃描一次活躍提醒，檢查是否需要發送通知
+- **智慧通知時機**: 根據設定的提前分鐘數，在垃圾車抵達前精準推播
+- **狀態管理**: 提醒狀態包括 `active`（活躍）、`sent`（已發送）、`expired`（已過期）、`cancelled`（已取消）
+- **自動清理**: 每小時清理過期提醒（超過 24 小時的舊提醒）
+
+### 運作機制
+1. **本地排程器**: 應用啟動時自動開始背景排程服務
+2. **外部觸發**: 支援透過 Cloud Scheduler 調用 `/tasks/dispatch-reminders` 端點
+3. **雙重保障**: 內建排程器與外部排程器同時運作，確保提醒不遺漏
+4. **效能優化**: 使用 Firestore count 查詢避免不必要的資料讀取
+
+### 提醒資料結構
+```go
+type Reminder struct {
+    ID             string    // 提醒 ID
+    UserID         string    // 用戶 LINE ID
+    StopName       string    // 垃圾車站點名稱
+    RouteID        string    // 路線 ID
+    ETA            time.Time // 預計抵達時間
+    AdvanceMinutes int       // 提前幾分鐘提醒
+    Status         string    // 提醒狀態
+    CreatedAt      time.Time // 建立時間
+    UpdatedAt      time.Time // 更新時間
+}
+```
 
 ## 專案結構
 
