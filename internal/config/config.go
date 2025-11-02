@@ -11,14 +11,14 @@ import (
 )
 
 type Config struct {
-	Port                     string
-	LineChannelSecret        string
-	LineChannelAccessToken   string
-	GoogleMapsAPIKey         string
-	GeminiAPIKey             string
-	GeminiModel              string
-	GCPProjectID             string
-	InternalTaskToken        string
+	Port                   string
+	LineChannelSecret      string
+	LineChannelAccessToken string
+	GoogleMapsAPIKey       string
+	GeminiAPIKey           string
+	GeminiModel            string
+	GCPProjectID           string
+	InternalTaskToken      string
 }
 
 func Load() *Config {
@@ -48,7 +48,7 @@ func Load() *Config {
 		LineChannelAccessToken: os.Getenv("LINE_CHANNEL_ACCESS_TOKEN"),
 		GoogleMapsAPIKey:       os.Getenv("GOOGLE_MAPS_API_KEY"),
 		GeminiAPIKey:           os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:            getEnvOrDefault("GEMINI_MODEL", "gemini-1.5-pro"),
+		GeminiModel:            getEnvOrDefault("GEMINI_MODEL", "gemini-2.0-flash"),
 		GCPProjectID:           os.Getenv("GCP_PROJECT_ID"),
 		InternalTaskToken:      internalTaskToken,
 	}
