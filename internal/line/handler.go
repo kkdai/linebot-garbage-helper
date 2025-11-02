@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -285,8 +286,119 @@ func (h *Handler) handleLocationMessage(ctx context.Context, userID string, lat,
 	}
 	h.replyMessage(ctx, userID, confirmMsg)
 	
-	// Search for nearby garbage trucks
-	h.searchNearbyGarbageTrucks(ctx, userID, lat, lng, nil)
+	// Search for nearby garbage trucks and offer to save location
+	h.searchNearbyGarbageTrucksWithSaveOption(ctx, userID, lat, lng, address, nil)
+}
+
+func (h *Handler) searchNearbyGarbageTrucksWithSaveOption(ctx context.Context, userID string, lat, lng float64, address string, intent *gemini.IntentResult) {
+	// 先搜尋垃圾車
+	h.searchNearbyGarbageTrucks(ctx, userID, lat, lng, intent)
+	
+	// 然後詢問是否要收藏此位置
+	if address != "" {
+		h.offerLocationSave(ctx, userID, lat, lng, address)
+	}
+}
+
+func (h *Handler) offerLocationSave(ctx context.Context, userID string, lat, lng float64, address string) {
+	// 檢查是否已經收藏過相近的位置
+	user, err := h.store.GetUser(ctx, userID)
+	if err == nil {
+		for _, fav := range user.Favorites {
+			// 檢查相近位置（100公尺內）
+			distance := geo.CalculateDistance(lat, lng, fav.Lat, fav.Lng)
+			if distance < 100 {
+				// 已有相近位置，不再詢問
+				return
+			}
+		}
+	}
+
+	// 建議收藏地點名稱
+	suggestedName := h.suggestLocationName(address)
+	
+	favoriteData := fmt.Sprintf("action=add_favorite&lat=%f&lng=%f&name=%s&address=%s", 
+		lat, lng, suggestedName, address)
+
+	// 創建詢問收藏的 Flex Message
+	bubble := messaging_api.FlexBubble{
+		Body: &messaging_api.FlexBox{
+			Layout: "vertical",
+			Contents: []messaging_api.FlexComponentInterface{
+				&messaging_api.FlexText{
+					Text:   "💡 要收藏這個位置嗎？",
+					Weight: "bold",
+					Size:   "md",
+				},
+				&messaging_api.FlexText{
+					Text:  fmt.Sprintf("📍 %s", address),
+					Size:  "sm",
+					Color: "#666666",
+					Wrap:  true,
+				},
+				&messaging_api.FlexText{
+					Text:  "收藏後可以直接輸入地點名稱快速查詢！",
+					Size:  "xs",
+					Color: "#999999",
+					Wrap:  true,
+				},
+			},
+		},
+		Footer: &messaging_api.FlexBox{
+			Layout: "horizontal",
+			Contents: []messaging_api.FlexComponentInterface{
+				&messaging_api.FlexButton{
+					Action: &messaging_api.PostbackAction{
+						Label: "⭐ 收藏",
+						Data:  favoriteData,
+					},
+					Style: "primary",
+					Flex:  2,
+				},
+				&messaging_api.FlexButton{
+					Action: &messaging_api.PostbackAction{
+						Label: "暫時不要",
+						Data:  "action=dismiss_save",
+					},
+					Style: "secondary",
+					Flex:  1,
+				},
+			},
+		},
+	}
+
+	flexMessage := messaging_api.FlexMessage{
+		AltText:  "收藏位置建議",
+		Contents: &bubble,
+	}
+
+	h.sendMessage(ctx, userID, &flexMessage)
+}
+
+func (h *Handler) suggestLocationName(address string) string {
+	// 簡單的地點名稱建議邏輯
+	if strings.Contains(address, "家") || strings.Contains(address, "住") {
+		return "家"
+	}
+	if strings.Contains(address, "公司") || strings.Contains(address, "辦公") {
+		return "公司"
+	}
+	if strings.Contains(address, "學校") || strings.Contains(address, "大學") {
+		return "學校"
+	}
+	
+	// 提取區域名稱作為建議
+	parts := strings.Split(address, " ")
+	if len(parts) > 0 {
+		firstPart := parts[0]
+		if len(firstPart) > 10 {
+			// 如果太長，取前面部分
+			return firstPart[:10] + "..."
+		}
+		return firstPart
+	}
+	
+	return "新地點"
 }
 
 func (h *Handler) handleCommand(ctx context.Context, userID, command string) {
@@ -445,20 +557,40 @@ func (h *Handler) createGarbageTruckBubble(stop *garbage.NearestStop) messaging_
 		},
 	}
 
+	favoriteData := fmt.Sprintf("action=add_favorite&lat=%f&lng=%f&name=%s&address=%s", 
+		stop.Stop.Lat, stop.Stop.Lng, stop.Stop.Name, stop.Stop.Name)
+
 	footer := messaging_api.FlexBox{
-		Layout: "horizontal",
+		Layout: "vertical",
 		Contents: []messaging_api.FlexComponentInterface{
-			&messaging_api.FlexButton{
-				Action: &messaging_api.UriAction{
-					Label: "導航",
-					Uri:   directionsURL,
+			&messaging_api.FlexBox{
+				Layout: "horizontal",
+				Contents: []messaging_api.FlexComponentInterface{
+					&messaging_api.FlexButton{
+						Action: &messaging_api.UriAction{
+							Label: "導航",
+							Uri:   directionsURL,
+						},
+						Style: "secondary",
+						Flex:  2,
+					},
+					&messaging_api.FlexButton{
+						Action: &messaging_api.PostbackAction{
+							Label: "提醒我",
+							Data:  reminderData,
+						},
+						Style: "primary",
+						Flex:  2,
+					},
 				},
 			},
 			&messaging_api.FlexButton{
 				Action: &messaging_api.PostbackAction{
-					Label: "提醒我",
-					Data:  reminderData,
+					Label: "⭐ 收藏此地點",
+					Data:  favoriteData,
 				},
+				Style: "link",
+				Color: "#999999",
 			},
 		},
 	}
@@ -482,6 +614,17 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 
 	data := event.Postback.Data
 	params := parsePostbackData(data)
+
+	// 處理收藏功能
+	if action, ok := params["action"]; ok {
+		if action == "add_favorite" {
+			h.handleAddFavoritePostback(ctx, userID, params)
+			return
+		} else if action == "dismiss_save" {
+			h.replyMessage(ctx, userID, "好的，如需收藏地點，可使用 `/favorite [名稱] [地址]` 指令")
+			return
+		}
+	}
 
 	if routeID, ok := params["route"]; ok {
 		stopName := params["stop"]
@@ -517,6 +660,64 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 		log.Printf("Successfully created reminder for user %s, will notify at %s", userID, notificationTime.Format("2006-01-02 15:04:05"))
 		h.replyMessage(ctx, userID, fmt.Sprintf("✅ 已設定提醒！\n將在垃圾車抵達 %s 前 10 分鐘通知您。", stopName))
 	}
+}
+
+func (h *Handler) handleAddFavoritePostback(ctx context.Context, userID string, params map[string]string) {
+	lat, err := strconv.ParseFloat(params["lat"], 64)
+	if err != nil {
+		h.replyMessage(ctx, userID, "收藏失敗：位置資訊錯誤")
+		return
+	}
+
+	lng, err := strconv.ParseFloat(params["lng"], 64)
+	if err != nil {
+		h.replyMessage(ctx, userID, "收藏失敗：位置資訊錯誤")
+		return
+	}
+
+	stopName := params["name"]
+	if stopName == "" {
+		h.replyMessage(ctx, userID, "收藏失敗：地點名稱為空")
+		return
+	}
+
+	// 檢查是否已經收藏過相同地點
+	user, err := h.store.GetUser(ctx, userID)
+	if err == nil {
+		for _, fav := range user.Favorites {
+			// 檢查是否已存在相同名稱或相近位置的收藏
+			if fav.Name == stopName || (math.Abs(fav.Lat-lat) < 0.001 && math.Abs(fav.Lng-lng) < 0.001) {
+				h.replyMessage(ctx, userID, fmt.Sprintf("「%s」已經在您的收藏清單中了！", stopName))
+				return
+			}
+		}
+	}
+
+	// 進行反向地理編碼獲取完整地址
+	location, err := h.geoClient.ReverseGeocode(ctx, lat, lng)
+	var address string
+	if err != nil {
+		log.Printf("Reverse geocoding failed: %v", err)
+		address = fmt.Sprintf("緯度 %f, 經度 %f", lat, lng)
+	} else {
+		address = location.Address
+	}
+
+	favorite := store.Favorite{
+		Name:    stopName,
+		Lat:     lat,
+		Lng:     lng,
+		Address: address,
+	}
+
+	err = h.store.AddFavorite(ctx, userID, favorite)
+	if err != nil {
+		log.Printf("Error adding favorite: %v", err)
+		h.replyMessage(ctx, userID, "收藏失敗，請稍後再試")
+		return
+	}
+
+	h.replyMessage(ctx, userID, fmt.Sprintf("⭐ 已收藏「%s」\n📍 %s\n\n💡 您可以直接輸入「%s」來快速查詢此地點的垃圾車資訊", stopName, address, stopName))
 }
 
 func (h *Handler) findUserFavoriteByName(ctx context.Context, userID, name string) *store.Favorite {
