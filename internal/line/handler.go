@@ -409,23 +409,27 @@ func (h *Handler) handleCommand(ctx context.Context, userID, command string) {
 	case "/help":
 		helpText := `歡迎使用垃圾車助手！
 
-功能說明：
-🗑️ 查詢垃圾車：發送位置或輸入地址
-⏰ 設定提醒：點擊查詢結果中的「提醒我」按鈕
-❤️ 收藏地點：使用 /favorite 指令
-📋 查看收藏：使用 /list 指令
-
-使用方式：
+🚛 查詢垃圾車：
 📍 分享位置：點擊「+」→「位置」→「即時位置」
 💬 輸入地址：「台北市大安區忠孝東路」
 🕐 時間查詢：「我晚上七點前在哪裡倒垃圾？」
 
-系統會自動為您找到最近的垃圾車站點！`
+⭐ 收藏管理：
+/list - 查看收藏清單（含互動按鈕）
+/favorite 家 台北市大安區 - 新增收藏
+/delete 家 - 刪除收藏
+
+⏰ 提醒功能：
+點擊查詢結果中的「提醒我」按鈕設定通知
+
+💡 更快速的收藏方式：
+🔸 分享位置後點擊「⭐ 收藏」
+🔸 查詢結果中點擊「收藏此地點」`
 		h.replyMessage(ctx, userID, helpText)
 
-	case "/favorite":
+	case "/favorite", "/add", "/save":
 		if len(parts) < 2 {
-			h.replyMessage(ctx, userID, "請使用：/favorite [地點名稱] [地址]")
+			h.replyMessage(ctx, userID, "請使用：/favorite [地點名稱] [地址]\n\n💡 或者您可以：\n📍 分享位置後點擊收藏\n🗑️ 查詢垃圾車後點擊「收藏此地點」")
 			return
 		}
 		name := parts[1]
@@ -433,7 +437,15 @@ func (h *Handler) handleCommand(ctx context.Context, userID, command string) {
 		h.addFavorite(ctx, userID, name, address)
 
 	case "/list":
-		h.listFavorites(ctx, userID)
+		h.listFavoritesWithUI(ctx, userID)
+		
+	case "/delete", "/remove":
+		if len(parts) < 2 {
+			h.replyMessage(ctx, userID, "請使用：/delete [地點名稱]")
+			return
+		}
+		name := strings.Join(parts[1:], " ")
+		h.deleteFavorite(ctx, userID, name)
 
 	default:
 		h.replyMessage(ctx, userID, "未知指令。請使用 /help 查看可用指令。")
@@ -617,11 +629,18 @@ func (h *Handler) handlePostbackEvent(ctx context.Context, event webhook.Postbac
 
 	// 處理收藏功能
 	if action, ok := params["action"]; ok {
-		if action == "add_favorite" {
+		switch action {
+		case "add_favorite":
 			h.handleAddFavoritePostback(ctx, userID, params)
 			return
-		} else if action == "dismiss_save" {
+		case "dismiss_save":
 			h.replyMessage(ctx, userID, "好的，如需收藏地點，可使用 `/favorite [名稱] [地址]` 指令")
+			return
+		case "query_favorite":
+			h.handleQueryFavoritePostback(ctx, userID, params)
+			return
+		case "delete_favorite":
+			h.handleDeleteFavoritePostback(ctx, userID, params)
 			return
 		}
 	}
@@ -720,6 +739,34 @@ func (h *Handler) handleAddFavoritePostback(ctx context.Context, userID string, 
 	h.replyMessage(ctx, userID, fmt.Sprintf("⭐ 已收藏「%s」\n📍 %s\n\n💡 您可以直接輸入「%s」來快速查詢此地點的垃圾車資訊", stopName, address, stopName))
 }
 
+func (h *Handler) handleQueryFavoritePostback(ctx context.Context, userID string, params map[string]string) {
+	lat, err := strconv.ParseFloat(params["lat"], 64)
+	if err != nil {
+		h.replyMessage(ctx, userID, "查詢失敗：位置資訊錯誤")
+		return
+	}
+
+	lng, err := strconv.ParseFloat(params["lng"], 64)
+	if err != nil {
+		h.replyMessage(ctx, userID, "查詢失敗：位置資訊錯誤")
+		return
+	}
+
+	name := params["name"]
+	h.replyMessage(ctx, userID, fmt.Sprintf("🔍 正在為您查詢「%s」附近的垃圾車...", name))
+	h.searchNearbyGarbageTrucks(ctx, userID, lat, lng, nil)
+}
+
+func (h *Handler) handleDeleteFavoritePostback(ctx context.Context, userID string, params map[string]string) {
+	name := params["name"]
+	if name == "" {
+		h.replyMessage(ctx, userID, "刪除失敗：地點名稱為空")
+		return
+	}
+
+	h.deleteFavorite(ctx, userID, name)
+}
+
 func (h *Handler) findUserFavoriteByName(ctx context.Context, userID, name string) *store.Favorite {
 	user, err := h.store.GetUser(ctx, userID)
 	if err != nil {
@@ -782,6 +829,145 @@ func (h *Handler) listFavorites(ctx context.Context, userID string) {
 	}
 
 	h.replyMessage(ctx, userID, message.String())
+}
+
+func (h *Handler) listFavoritesWithUI(ctx context.Context, userID string) {
+	user, err := h.store.GetUser(ctx, userID)
+	if err != nil {
+		h.replyMessage(ctx, userID, "無法取得收藏清單")
+		return
+	}
+
+	if len(user.Favorites) == 0 {
+		welcomeMsg := `您還沒有收藏任何地點
+
+💡 如何新增收藏：
+📍 分享位置後點擊「⭐ 收藏」
+🗑️ 查詢垃圾車後點擊「收藏此地點」  
+💬 使用指令：/favorite 家 台北市大安區`
+		h.replyMessage(ctx, userID, welcomeMsg)
+		return
+	}
+
+	// 創建收藏清單的 Flex Message
+	var bubbles []messaging_api.FlexBubble
+	
+	for i, fav := range user.Favorites {
+		if i >= 10 { // 限制最多顯示10個收藏
+			break
+		}
+		
+		bubble := h.createFavoriteBubble(fav)
+		bubbles = append(bubbles, bubble)
+	}
+
+	carousel := messaging_api.FlexCarousel{
+		Contents: bubbles,
+	}
+
+	flexMessage := messaging_api.FlexMessage{
+		AltText:  fmt.Sprintf("您的收藏清單 (%d個地點)", len(user.Favorites)),
+		Contents: &carousel,
+	}
+
+	h.sendMessage(ctx, userID, &flexMessage)
+}
+
+func (h *Handler) createFavoriteBubble(fav store.Favorite) messaging_api.FlexBubble {
+	// 截短地址顯示
+	shortAddress := fav.Address
+	if len(shortAddress) > 30 {
+		shortAddress = shortAddress[:30] + "..."
+	}
+
+	queryData := fmt.Sprintf("action=query_favorite&lat=%f&lng=%f&name=%s", 
+		fav.Lat, fav.Lng, fav.Name)
+	deleteData := fmt.Sprintf("action=delete_favorite&name=%s", fav.Name)
+
+	body := messaging_api.FlexBox{
+		Layout: "vertical",
+		Contents: []messaging_api.FlexComponentInterface{
+			&messaging_api.FlexText{
+				Text:   fav.Name,
+				Weight: "bold",
+				Size:   "lg",
+				Color:  "#333333",
+			},
+			&messaging_api.FlexText{
+				Text:  shortAddress,
+				Size:  "sm",
+				Color: "#666666",
+				Wrap:  true,
+			},
+		},
+	}
+
+	footer := messaging_api.FlexBox{
+		Layout: "vertical",
+		Contents: []messaging_api.FlexComponentInterface{
+			&messaging_api.FlexBox{
+				Layout: "horizontal",
+				Contents: []messaging_api.FlexComponentInterface{
+					&messaging_api.FlexButton{
+						Action: &messaging_api.PostbackAction{
+							Label: "🚛 查詢垃圾車",
+							Data:  queryData,
+						},
+						Style: "primary",
+						Flex:  3,
+					},
+					&messaging_api.FlexButton{
+						Action: &messaging_api.PostbackAction{
+							Label: "🗑️ 刪除",
+							Data:  deleteData,
+						},
+						Style: "secondary",
+						Flex:  1,
+					},
+				},
+			},
+		},
+	}
+
+	return messaging_api.FlexBubble{
+		Body:   &body,
+		Footer: &footer,
+	}
+}
+
+func (h *Handler) deleteFavorite(ctx context.Context, userID, name string) {
+	user, err := h.store.GetUser(ctx, userID)
+	if err != nil {
+		h.replyMessage(ctx, userID, "無法取得收藏清單")
+		return
+	}
+
+	// 查找要刪除的收藏
+	found := false
+	var newFavorites []store.Favorite
+	for _, fav := range user.Favorites {
+		if strings.EqualFold(strings.TrimSpace(fav.Name), strings.TrimSpace(name)) {
+			found = true
+			continue // 跳過這個收藏（等於刪除）
+		}
+		newFavorites = append(newFavorites, fav)
+	}
+
+	if !found {
+		h.replyMessage(ctx, userID, fmt.Sprintf("找不到名為「%s」的收藏地點", name))
+		return
+	}
+
+	// 更新用戶收藏清單
+	user.Favorites = newFavorites
+	err = h.store.UpsertUser(ctx, user)
+	if err != nil {
+		log.Printf("Error updating user favorites: %v", err)
+		h.replyMessage(ctx, userID, "刪除收藏失敗，請稍後再試")
+		return
+	}
+
+	h.replyMessage(ctx, userID, fmt.Sprintf("✅ 已刪除收藏「%s」", name))
 }
 
 func (h *Handler) replyMessage(ctx context.Context, userID, text string) {
