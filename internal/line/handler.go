@@ -169,52 +169,52 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 	
 	log.Printf("Intent analysis result: %+v", intent)
 
-	if intent.District != "" {
-		log.Printf("Geocoding district: %s", intent.District)
-		location, err := h.geoClient.GeocodeAddress(ctx, intent.District)
-		if err != nil {
-			log.Printf("Error geocoding address '%s' for user %s: %v", intent.District, userID, err)
-			h.replyMessage(ctx, userID, "抱歉，我找不到這個地址的位置資訊。")
-			return
-		}
-		log.Printf("Geocoded successfully: %+v", location)
-		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
-	} else {
-		// 首先檢查是否是收藏地點名稱
-		favorite := h.findUserFavoriteByName(ctx, userID, text)
-		if favorite != nil {
-			log.Printf("Found favorite location '%s' for user %s: lat=%f, lng=%f", text, userID, favorite.Lat, favorite.Lng)
-			h.searchNearbyGarbageTrucks(ctx, userID, favorite.Lat, favorite.Lng, intent)
-			return
-		}
-		
-		// 檢查是否有時間窗口查詢但沒有地址
-		if intent != nil && (intent.TimeWindow.From != "" || intent.TimeWindow.To != "") {
-			log.Printf("Time window query detected without specific location: %s", text)
-			// 提示用戶需要提供位置資訊或使用收藏地點
-			h.handleTimeQueryWithoutLocation(ctx, userID, intent)
-			return
-		}
-		
-		log.Printf("Extracting location from text: %s", text)
-		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
-		if err != nil || extractedLocation == "" {
-			log.Printf("Failed to extract location from text '%s' for user %s: %v", text, userID, err)
-			h.replyMessage(ctx, userID, "請提供具體的地址或分享您的位置，我幫您查詢附近的垃圾車。")
-			return
-		}
-		
-		log.Printf("Extracted location: %s", extractedLocation)
-
-		location, err := h.geoClient.GeocodeAddress(ctx, extractedLocation)
-		if err != nil {
-			log.Printf("Error geocoding extracted location '%s' for user %s: %v", extractedLocation, userID, err)
-			h.replyMessage(ctx, userID, "抱歉，我找不到這個地址的位置資訊。")
-			return
-		}
-		log.Printf("Geocoded extracted location successfully: %+v", location)
-		h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
+	// 首先檢查是否是收藏地點名稱
+	favorite := h.findUserFavoriteByName(ctx, userID, text)
+	if favorite != nil {
+		log.Printf("Found favorite location '%s' for user %s: lat=%f, lng=%f", text, userID, favorite.Lat, favorite.Lng)
+		h.searchNearbyGarbageTrucks(ctx, userID, favorite.Lat, favorite.Lng, intent)
+		return
 	}
+	
+	// 檢查是否有時間窗口查詢但沒有地址  
+	if intent != nil && (intent.TimeWindow.From != "" || intent.TimeWindow.To != "") && intent.District == "" {
+		log.Printf("Time window query detected without specific location: %s", text)
+		h.handleTimeQueryWithoutLocation(ctx, userID, intent)
+		return
+	}
+
+	// 嘗試多種方式提取地址
+	var addressToGeocode string
+	
+	// 方法1：使用 Gemini 解析的 District
+	if intent.District != "" {
+		addressToGeocode = intent.District
+		log.Printf("Using district from intent: %s", addressToGeocode)
+	} else {
+		// 方法2：使用 Gemini 提取地址
+		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
+		if err == nil && extractedLocation != "" {
+			addressToGeocode = extractedLocation
+			log.Printf("Extracted location from text: %s", addressToGeocode)
+		} else {
+			// 方法3：直接使用原始文字作為地址
+			addressToGeocode = text
+			log.Printf("Using original text as address: %s", addressToGeocode)
+		}
+	}
+	
+	// 進行地理編碼
+	log.Printf("Geocoding address: %s", addressToGeocode)
+	location, err := h.geoClient.GeocodeAddress(ctx, addressToGeocode)
+	if err != nil {
+		log.Printf("Error geocoding address '%s' for user %s: %v", addressToGeocode, userID, err)
+		h.replyMessage(ctx, userID, fmt.Sprintf("抱歉，我找不到「%s」的位置資訊。\n\n💡 請嘗試：\n📍 分享您的位置\n💬 輸入更具體的地址（如：台北市信義區忠孝東路）", text))
+		return
+	}
+	
+	log.Printf("Geocoded successfully: %+v", location)
+	h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 }
 
 func (h *Handler) handleTimeQueryWithoutLocation(ctx context.Context, userID string, intent *gemini.IntentResult) {
