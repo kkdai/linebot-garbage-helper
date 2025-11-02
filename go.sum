@@ -75,8 +75,6 @@ github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORN
 github.com/kr/pretty v0.2.0/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
-github.com/line/line-bot-sdk-go/v8 v8.5.0 h1:kY5LB9OZ8VDWWNBZeJRUj2GTK4jjfJy9e/N+Ke5yMs4=
-github.com/line/line-bot-sdk-go/v8 v8.5.0/go.mod h1:n9Ly8OHM6xCeQktLzRpQHe/yBda95kFgmQUefUQeFCs=
 github.com/line/line-bot-sdk-go/v8 v8.17.0 h1:KMyDLXo3ni0iLCbvH1tU1y+OwWWLoM7bwvc3ywBAUjI=
 github.com/line/line-bot-sdk-go/v8 v8.17.0/go.mod h1:AeSRUuu7WGgveGDJb6DyKyFUOst2UB2aF6LO2cQeuXs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

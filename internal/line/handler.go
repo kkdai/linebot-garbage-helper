@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -187,30 +188,63 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 
 	// 嘗試多種方式提取地址
 	var addressToGeocode string
+	var addressMethod string
 	
 	// 方法1：使用 Gemini 解析的 District
 	if intent != nil && intent.District != "" {
 		addressToGeocode = intent.District
-		log.Printf("Using district from intent: %s", addressToGeocode)
+		addressMethod = "intent.District"
+		log.Printf("Method 1 - Using district from intent: %s", addressToGeocode)
 	} else {
 		// 方法2：使用 Gemini 提取地址
 		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
-		if err == nil && extractedLocation != "" {
-			addressToGeocode = extractedLocation
-			log.Printf("Extracted location from text: %s", addressToGeocode)
+		if err == nil && extractedLocation != "" && strings.TrimSpace(extractedLocation) != "" {
+			addressToGeocode = strings.TrimSpace(extractedLocation)
+			addressMethod = "gemini.ExtractLocation"
+			log.Printf("Method 2 - Extracted location from text: %s", addressToGeocode)
 		} else {
 			// 方法3：直接使用原始文字作為地址
 			addressToGeocode = text
-			log.Printf("Using original text as address: %s", addressToGeocode)
+			addressMethod = "original.text"
+			log.Printf("Method 3 - Using original text as address: %s", addressToGeocode)
+			if err != nil {
+				log.Printf("Gemini ExtractLocationFromText failed: %v", err)
+			}
 		}
 	}
 	
 	// 進行地理編碼
-	log.Printf("Geocoding address: %s", addressToGeocode)
+	log.Printf("Geocoding address: '%s' using method: %s", addressToGeocode, addressMethod)
 	location, err := h.geoClient.GeocodeAddress(ctx, addressToGeocode)
 	if err != nil {
-		log.Printf("Error geocoding address '%s' for user %s: %v", addressToGeocode, userID, err)
-		h.replyMessage(ctx, userID, fmt.Sprintf("抱歉，我找不到「%s」的位置資訊。\n\n💡 請嘗試：\n📍 分享您的位置\n💬 輸入更具體的地址（如：台北市信義區忠孝東路）", text))
+		log.Printf("Error geocoding address '%s' (method: %s) for user %s: %v", addressToGeocode, addressMethod, userID, err)
+		
+		// 如果使用提取的地址失敗，嘗試使用原始文字
+		if addressMethod != "original.text" {
+			log.Printf("Fallback 1: trying original text as address: %s", text)
+			location, err = h.geoClient.GeocodeAddress(ctx, text)
+			if err == nil {
+				log.Printf("Fallback 1 geocoding succeeded with original text")
+				h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
+				return
+			}
+			log.Printf("Fallback 1 geocoding also failed: %v", err)
+		}
+		
+		// 嘗試簡化地址（提取縣市區）
+		simplifiedAddress := h.extractSimplifiedAddress(text)
+		if simplifiedAddress != "" && simplifiedAddress != addressToGeocode && simplifiedAddress != text {
+			log.Printf("Fallback 2: trying simplified address: %s", simplifiedAddress)
+			location, err = h.geoClient.GeocodeAddress(ctx, simplifiedAddress)
+			if err == nil {
+				log.Printf("Fallback 2 geocoding succeeded with simplified address")
+				h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
+				return
+			}
+			log.Printf("Fallback 2 geocoding also failed: %v", err)
+		}
+		
+		h.replyMessage(ctx, userID, fmt.Sprintf("抱歉，我找不到「%s」的位置資訊。\n\n💡 請嘗試：\n📍 分享您的位置\n💬 輸入更具體的地址（如：台北市信義區忠孝東路）\n🔍 或者搜尋：「台北市中正區」", text))
 		return
 	}
 	
@@ -968,6 +1002,32 @@ func (h *Handler) deleteFavorite(ctx context.Context, userID, name string) {
 	}
 
 	h.replyMessage(ctx, userID, fmt.Sprintf("✅ 已刪除收藏「%s」", name))
+}
+
+func (h *Handler) extractSimplifiedAddress(text string) string {
+	// 嘗試提取縣市區的模式
+	patterns := []string{
+		`(台北市|新北市|桃園市|台中市|台南市|高雄市|基隆市|新竹市|嘉義市)[^市]*?(區|市)`,
+		`(新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|澎湖縣|金門縣|連江縣)[^縣]*?(鄉|鎮|市)`,
+	}
+	
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if match := re.FindString(text); match != "" {
+			log.Printf("Extracted simplified address using pattern: %s -> %s", pattern, match)
+			return match
+		}
+	}
+	
+	// 如果沒有匹配，嘗試提取縣市
+	cityPattern := `(台北市|新北市|桃園市|台中市|台南市|高雄市|基隆市|新竹市|嘉義市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|澎湖縣|金門縣|連江縣)`
+	re := regexp.MustCompile(cityPattern)
+	if match := re.FindString(text); match != "" {
+		log.Printf("Extracted city from address: %s", match)
+		return match
+	}
+	
+	return ""
 }
 
 func (h *Handler) replyMessage(ctx context.Context, userID, text string) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
@@ -50,9 +51,15 @@ func (gc *GeminiClient) AnalyzeIntent(ctx context.Context, userMessage string) (
 
 使用者輸入可能包含地名與時間。請分析輸入並輸出 JSON 格式的結果。
 
+重要：對於 district 欄位，請提取最具體的地區資訊，包含縣市和區域。例如：
+- 「台北市中正區重慶南路一段122號」→ "台北市中正區"
+- 「新北市板橋區縣民大道」→ "新北市板橋區"
+- 「台北市大安區」→ "台北市大安區"
+- 「台北市」→ "台北市"
+
 輸出格式：
 {
-  "district": "地區名稱（如果有的話）",
+  "district": "最具體的地區名稱（縣市+區域，如果有的話）",
   "time_window": {
     "from": "開始時間（HH:MM格式，如果有的話）",
     "to": "結束時間（HH:MM格式，如果有的話）"
@@ -71,6 +78,18 @@ func (gc *GeminiClient) AnalyzeIntent(ctx context.Context, userMessage string) (
     "to": "19:00"
   },
   "keywords": ["台北市", "大安區", "倒垃圾", "晚上", "七點"],
+  "query_type": "garbage_truck_eta"
+}
+
+輸入：「台北市中正區重慶南路一段122號」
+輸出：
+{
+  "district": "台北市中正區",
+  "time_window": {
+    "from": "",
+    "to": ""
+  },
+  "keywords": ["台北市", "中正區", "重慶南路"],
   "query_type": "garbage_truck_eta"
 }
 
@@ -153,6 +172,8 @@ func (gc *GeminiClient) ExtractLocationFromText(ctx context.Context, text string
 	}
 	
 	location := fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0])
+	// 清理回應文字，移除多餘的換行符和空白
+	location = strings.TrimSpace(location)
 	return location, nil
 }
 
