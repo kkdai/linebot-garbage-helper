@@ -164,8 +164,8 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 	intent, err := h.geminiClient.AnalyzeIntent(ctx, text)
 	if err != nil {
 		log.Printf("Error analyzing intent for user %s: %v", userID, err)
-		h.replyMessage(ctx, userID, "抱歉，我無法理解您的訊息。\n\n💡 您可以：\n📍 分享您的位置\n💬 輸入地址\n❓ 輸入 /help 查看使用說明")
-		return
+		// 意圖分析失敗時，仍然嘗試作為地址處理
+		intent = nil
 	}
 	
 	log.Printf("Intent analysis result: %+v", intent)
@@ -189,7 +189,7 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 	var addressToGeocode string
 	
 	// 方法1：使用 Gemini 解析的 District
-	if intent.District != "" {
+	if intent != nil && intent.District != "" {
 		addressToGeocode = intent.District
 		log.Printf("Using district from intent: %s", addressToGeocode)
 	} else {
