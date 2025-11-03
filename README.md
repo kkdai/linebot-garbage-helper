@@ -34,6 +34,62 @@ GCP_PROJECT_ID=your_gcp_project_id
 # INTERNAL_TASK_TOKEN=your_custom_token
 ```
 
+### 🔑 Google Maps API Key 設定指南
+
+Google Maps API 是本專案的核心依賴，用於地址轉換和地理編碼。請確保完成以下設定步驟：
+
+#### 1. 啟用必要的 API
+
+前往 [GCP Console - API Library](https://console.cloud.google.com/apis/library)，啟用以下 API：
+
+- ✅ **Geocoding API** - 地址轉坐標（必需）
+- ✅ **Maps JavaScript API** - 地圖顯示
+- ✅ **Places API** - 地點搜索
+- ✅ **Geolocation API** - 定位服務
+
+**快速啟用命令**：
+```bash
+gcloud services enable \
+  geocoding-backend.googleapis.com \
+  maps-backend.googleapis.com \
+  places-backend.googleapis.com \
+  geolocation.googleapis.com \
+  --project=your-project-id
+```
+
+#### 2. 建立 API Key
+
+1. 前往 [APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
+2. 點擊 **"CREATE CREDENTIALS"** → **"API key"**
+3. 複製產生的 API key
+
+#### 3. 設定 API Key 限制（重要！）
+
+為了安全性，請限制 API Key 的使用範圍：
+
+**API 限制**：
+- 選擇 **"Restrict key"**
+- 勾選：Geocoding API、Places API、Maps JavaScript API、Geolocation API
+
+**應用程式限制**（建議）：
+- **本地開發**：選擇 "None"
+- **生產環境**：選擇 "IP addresses" 並設定 Cloud Run 的出站 IP
+
+#### 4. 驗證設定
+
+等待 1-2 分鐘讓 API key 生效，然後測試：
+
+```bash
+curl "https://maps.googleapis.com/maps/api/geocode/json?address=台北101&key=你的API_KEY"
+```
+
+成功回應應包含 `"status": "OK"`
+
+#### 5. 費用說明
+
+- 免費額度：每月 $200（約 40,000 次 Geocoding 請求）
+- 建議設定 [預算提醒](https://console.cloud.google.com/billing/budgets) 避免超支
+
 ## 快速開始
 
 1. **克隆專案**
@@ -47,6 +103,11 @@ GCP_PROJECT_ID=your_gcp_project_id
    cp .env.example .env
    # 編輯 .env 文件，填入必要的 API 金鑰
    ```
+
+   ⚠️ **重要**：請確保已按照上方 [Google Maps API Key 設定指南](#-google-maps-api-key-設定指南) 完成以下步驟：
+   - 在 GCP Console 啟用 Geocoding API 等必要服務
+   - 建立並配置 API Key
+   - 將 API Key 填入 `.env` 文件的 `GOOGLE_MAPS_API_KEY` 欄位
 
 3. **安裝依賴**
    ```bash
@@ -93,8 +154,10 @@ GCP_PROJECT_ID=your_gcp_project_id
    _GOOGLE_MAPS_API_KEY: your_google_maps_api_key
    _GEMINI_API_KEY: your_gemini_api_key
    ```
-   
-   ⚡ **注意**: `INTERNAL_TASK_TOKEN` 現在會自動生成，無需手動設定！
+
+   ⚡ **注意**：
+   - `INTERNAL_TASK_TOKEN` 現在會自動生成，無需手動設定
+   - ⚠️ `_GOOGLE_MAPS_API_KEY` 請確保已按照上方 [Google Maps API Key 設定指南](#-google-maps-api-key-設定指南) 完成 API 啟用步驟
 
 4. **推送程式碼自動部署**
    ```bash
@@ -105,10 +168,19 @@ GCP_PROJECT_ID=your_gcp_project_id
 
 1. **啟用必要的 API**
    ```bash
+   # 啟用 Cloud Run 和資料庫服務
    gcloud services enable run.googleapis.com
    gcloud services enable firestore.googleapis.com
    gcloud services enable cloudscheduler.googleapis.com
+
+   # ⚠️ 重要：啟用 Google Maps API（必需）
+   gcloud services enable geocoding-backend.googleapis.com
+   gcloud services enable maps-backend.googleapis.com
+   gcloud services enable places-backend.googleapis.com
+   gcloud services enable geolocation.googleapis.com
    ```
+
+   詳細的 Google Maps API 配置請參考上方 [Google Maps API Key 設定指南](#-google-maps-api-key-設定指南)
 
 2. **部署到 Cloud Run**
    ```bash
