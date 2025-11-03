@@ -189,51 +189,34 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 	// 嘗試多種方式提取地址
 	var addressToGeocode string
 	var addressMethod string
-	
-	// 方法1：使用 Gemini 解析的 District
-	if intent != nil && intent.District != "" {
-		addressToGeocode = intent.District
-		addressMethod = "intent.District"
-		log.Printf("Method 1 - Using district from intent: %s", addressToGeocode)
-	} else {
-		// 方法2：使用 Gemini 提取地址
-		extractedLocation, err := h.geminiClient.ExtractLocationFromText(ctx, text)
-		if err == nil && extractedLocation != "" && strings.TrimSpace(extractedLocation) != "" {
-			addressToGeocode = strings.TrimSpace(extractedLocation)
-			addressMethod = "gemini.ExtractLocation"
-			log.Printf("Method 2 - Extracted location from text: %s", addressToGeocode)
-		} else {
-			// 方法3：直接使用原始文字作為地址
-			addressToGeocode = text
-			addressMethod = "original.text"
-			log.Printf("Method 3 - Using original text as address: %s", addressToGeocode)
-			if err != nil {
-				log.Printf("Gemini ExtractLocationFromText failed: %v", err)
-			}
-		}
-	}
+
+	// 方法1：優先使用原始文字作為地址（最準確）
+	addressToGeocode = text
+	addressMethod = "original.text"
+	log.Printf("Method 1 - Using original text as address: %s", addressToGeocode)
 	
 	// 進行地理編碼
 	log.Printf("Geocoding address: '%s' using method: %s", addressToGeocode, addressMethod)
 	location, err := h.geoClient.GeocodeAddress(ctx, addressToGeocode)
 	if err != nil {
 		log.Printf("Error geocoding address '%s' (method: %s) for user %s: %v", addressToGeocode, addressMethod, userID, err)
-		
-		// 如果使用提取的地址失敗，嘗試使用原始文字
-		if addressMethod != "original.text" {
-			log.Printf("Fallback 1: trying original text as address: %s", text)
-			location, err = h.geoClient.GeocodeAddress(ctx, text)
+
+		// Fallback 1: 嘗試使用 Gemini ExtractLocationFromText
+		extractedLocation, extractErr := h.geminiClient.ExtractLocationFromText(ctx, text)
+		if extractErr == nil && extractedLocation != "" && strings.TrimSpace(extractedLocation) != text {
+			log.Printf("Fallback 1: trying extracted location: %s", extractedLocation)
+			location, err = h.geoClient.GeocodeAddress(ctx, extractedLocation)
 			if err == nil {
-				log.Printf("Fallback 1 geocoding succeeded with original text")
+				log.Printf("Fallback 1 geocoding succeeded with extracted location")
 				h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 				return
 			}
-			log.Printf("Fallback 1 geocoding also failed: %v", err)
+			log.Printf("Fallback 1 geocoding failed: %v", err)
 		}
-		
-		// 嘗試簡化地址（提取縣市區）
+
+		// Fallback 2: 嘗試簡化地址（提取縣市區）
 		simplifiedAddress := h.extractSimplifiedAddress(text)
-		if simplifiedAddress != "" && simplifiedAddress != addressToGeocode && simplifiedAddress != text {
+		if simplifiedAddress != "" && simplifiedAddress != text {
 			log.Printf("Fallback 2: trying simplified address: %s", simplifiedAddress)
 			location, err = h.geoClient.GeocodeAddress(ctx, simplifiedAddress)
 			if err == nil {
@@ -241,9 +224,21 @@ func (h *Handler) handleTextMessage(ctx context.Context, userID, text string) {
 				h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
 				return
 			}
-			log.Printf("Fallback 2 geocoding also failed: %v", err)
+			log.Printf("Fallback 2 geocoding failed: %v", err)
 		}
-		
+
+		// Fallback 3: 如果有 intent.District，嘗試使用它
+		if intent != nil && intent.District != "" && intent.District != text {
+			log.Printf("Fallback 3: trying intent district: %s", intent.District)
+			location, err = h.geoClient.GeocodeAddress(ctx, intent.District)
+			if err == nil {
+				log.Printf("Fallback 3 geocoding succeeded with intent district")
+				h.searchNearbyGarbageTrucks(ctx, userID, location.Lat, location.Lng, intent)
+				return
+			}
+			log.Printf("Fallback 3 geocoding failed: %v", err)
+		}
+
 		h.replyMessage(ctx, userID, fmt.Sprintf("抱歉，我找不到「%s」的位置資訊。\n\n💡 請嘗試：\n📍 分享您的位置\n💬 輸入更具體的地址（如：台北市信義區忠孝東路）\n🔍 或者搜尋：「台北市中正區」", text))
 		return
 	}

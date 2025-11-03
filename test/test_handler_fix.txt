@@ -1,0 +1,36 @@
+修改總結：
+
+## 問題原因
+handler.go 優先使用 intent.District，而 Gemini 只提取了"台北市"或"新北市"，而非完整的"台北市中正區"或"新北市三重區"。
+
+## 解決方案
+修改 handler.go:193-196，改為:
+- 優先使用原始文字 (text) 進行 Geocoding
+- 只有當原始文字失敗時才使用 fallback 機制
+- Fallback 順序:
+  1. Gemini ExtractLocationFromText  
+  2. 簡化地址 (regex 提取縣市+區)
+  3. intent.District (最後手段)
+
+## 修改內容
+文件: internal/line/handler.go:189-247
+
+舊邏輯:
+1. intent.District (有問題的方法)
+2. ExtractLocationFromText
+3. 原始文字
+
+新邏輯:
+1. 原始文字 (✅ 最準確)
+2. Fallback 1: ExtractLocationFromText
+3. Fallback 2: 簡化地址
+4. Fallback 3: intent.District
+
+## 測試驗證
+輸入: "新北市三重區仁義街"
+- 舊版本: 使用 "新北市" → 錯誤位置
+- 新版本: 使用 "新北市三重區仁義街" → 正確位置 ✅
+
+輸入: "台北市中正區重慶南路一段122號"
+- 舊版本: 使用 "台北市" → 錯誤位置  
+- 新版本: 使用 "台北市中正區重慶南路一段122號" → 正確位置 ✅

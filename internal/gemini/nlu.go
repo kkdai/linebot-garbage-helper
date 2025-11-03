@@ -47,80 +47,43 @@ func (gc *GeminiClient) Close() error {
 func (gc *GeminiClient) AnalyzeIntent(ctx context.Context, userMessage string) (*IntentResult, error) {
 	model := gc.client.GenerativeModel(gc.model)
 	
-	prompt := fmt.Sprintf(`你是一個查詢意圖分析器，專門分析使用者關於垃圾車的查詢。
+	prompt := fmt.Sprintf(`分析使用者關於垃圾車的查詢，並提取地址資訊。
 
-使用者輸入可能包含地名與時間。請分析輸入並輸出 JSON 格式的結果。
+任務：從輸入文字中提取地址的「縣市」和「區/鄉鎮」。
 
-重要：對於 district 欄位，請提取最具體的地區資訊，包含縣市和區域。例如：
-- 「台北市中正區重慶南路一段122號」→ "台北市中正區"
-- 「新北市板橋區縣民大道」→ "新北市板橋區"
-- 「台北市大安區」→ "台北市大安區"
-- 「台北市」→ "台北市"
+步驟：
+1. 識別文字中的縣市名稱（如：台北市、新北市、桃園市等）
+2. 識別文字中的區/鄉鎮名稱（如：中正區、三重區、板橋區等）
+3. 將縣市和區/鄉鎮組合成完整地址（如：台北市中正區、新北市三重區）
 
-輸出格式：
+critical_rules：
+- 如果文字同時包含縣市和區域，district 必須包含兩者
+- "新北市三重區仁義街" → district = "新北市三重區"
+- "台北市中正區重慶南路一段122號" → district = "台北市中正區"
+- "台北市" → district = "台北市"
+
+輸出 JSON 格式：
 {
-  "district": "最具體的地區名稱（縣市+區域，如果有的話）",
-  "time_window": {
-    "from": "開始時間（HH:MM格式，如果有的話）",
-    "to": "結束時間（HH:MM格式，如果有的話）"
-  },
-  "keywords": ["關鍵字陣列"],
+  "district": "縣市+區域的完整組合",
+  "time_window": {"from": "", "to": ""},
+  "keywords": ["關鍵字"],
   "query_type": "garbage_truck_eta"
 }
 
 範例：
-輸入：「我晚上七點前在台北市大安區哪裡倒垃圾？」
-輸出：
-{
-  "district": "台北市大安區",
-  "time_window": {
-    "from": "",
-    "to": "19:00"
-  },
-  "keywords": ["台北市", "大安區", "倒垃圾", "晚上", "七點"],
-  "query_type": "garbage_truck_eta"
-}
 
-輸入：「台北市中正區重慶南路一段122號」
-輸出：
-{
-  "district": "台北市中正區",
-  "time_window": {
-    "from": "",
-    "to": ""
-  },
-  "keywords": ["台北市", "中正區", "重慶南路"],
-  "query_type": "garbage_truck_eta"
-}
+Input: "新北市三重區仁義街"
+Output: {"district": "新北市三重區", "time_window": {"from": "", "to": ""}, "keywords": ["新北市", "三重區", "仁義街"], "query_type": "garbage_truck_eta"}
 
-輸入：「我晚上七點前在哪裡倒垃圾？」
-輸出：
-{
-  "district": "",
-  "time_window": {
-    "from": "",
-    "to": "19:00"
-  },
-  "keywords": ["倒垃圾", "晚上", "七點", "哪裡"],
-  "query_type": "garbage_truck_eta"
-}
+Input: "台北市中正區重慶南路一段122號"
+Output: {"district": "台北市中正區", "time_window": {"from": "", "to": ""}, "keywords": ["台北市", "中正區", "重慶南路"], "query_type": "garbage_truck_eta"}
 
-輸入：「家」
-輸出：
-{
-  "district": "",
-  "time_window": {
-    "from": "",
-    "to": ""
-  },
-  "keywords": ["家"],
-  "query_type": "favorite_location"
-}
+Input: "台北市"
+Output: {"district": "台北市", "time_window": {"from": "", "to": ""}, "keywords": ["台北市"], "query_type": "garbage_truck_eta"}
 
-請分析以下使用者輸入：
-「%s」
+現在分析：「%s」
 
-請只回傳 JSON，不要包含其他說明文字。`, userMessage)
+只回傳 JSON，不要其他文字。`, userMessage)
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
