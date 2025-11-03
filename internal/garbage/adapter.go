@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"linebot-garbage-helper/internal/geo"
+	"linebot-garbage-helper/internal/utils"
 )
 
 type GarbageAdapter struct {
@@ -109,7 +110,7 @@ func (ga *GarbageAdapter) FetchGarbageData(ctx context.Context) (*GarbageData, e
 
 func (ga *GarbageAdapter) FindNearestStops(userLat, userLng float64, data *GarbageData, limit int) ([]*NearestStop, error) {
 	var nearestStops []*NearestStop
-	now := time.Now()
+	now := utils.NowInTaiwan()
 	
 	for _, point := range data.Result.Results {
 		lat, lng, err := ga.parseCoordinates(point.Latitude, point.Longitude)
@@ -124,6 +125,7 @@ func (ga *GarbageAdapter) FindNearestStops(userLat, userLng float64, data *Garba
 			continue
 		}
 		
+		// 使用台灣時區比較時間
 		if eta.Before(now) {
 			eta = eta.Add(24 * time.Hour)
 		}
@@ -162,6 +164,7 @@ func (ga *GarbageAdapter) FindNearestStops(userLat, userLng float64, data *Garba
 
 func (ga *GarbageAdapter) FindStopsInTimeWindow(userLat, userLng float64, data *GarbageData, timeWindow TimeWindow, maxDistance float64) ([]*NearestStop, error) {
 	var validStops []*NearestStop
+	now := utils.NowInTaiwan()
 	
 	for _, point := range data.Result.Results {
 		lat, lng, err := ga.parseCoordinates(point.Latitude, point.Longitude)
@@ -180,7 +183,7 @@ func (ga *GarbageAdapter) FindStopsInTimeWindow(userLat, userLng float64, data *
 			continue
 		}
 		
-		if eta.Before(time.Now()) {
+		if eta.Before(now) {
 			eta = eta.Add(24 * time.Hour)
 		}
 		
@@ -222,7 +225,8 @@ type TimeWindow struct {
 }
 
 func parseTimeToToday(timeStr string) (time.Time, error) {
-	now := time.Now()
+	taipeiTZ := utils.GetTaiwanTimezone()
+	now := utils.NowInTaiwan()
 	
 	if len(timeStr) == 4 {
 		layout := "1504"
@@ -230,7 +234,7 @@ func parseTimeToToday(timeStr string) (time.Time, error) {
 		if err != nil {
 			return time.Time{}, err
 		}
-		return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location()), nil
+		return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, taipeiTZ), nil
 	}
 	
 	layout := "15:04"
@@ -239,7 +243,7 @@ func parseTimeToToday(timeStr string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	
-	return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location()), nil
+	return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, taipeiTZ), nil
 }
 
 func isTimeInWindow(t time.Time, window TimeWindow) bool {

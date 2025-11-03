@@ -9,6 +9,7 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"linebot-garbage-helper/internal/store"
+	"linebot-garbage-helper/internal/utils"
 )
 
 type Scheduler struct {
@@ -38,7 +39,7 @@ func (rs *ReminderService) ProcessReminders(ctx context.Context) error {
 }
 
 func (s *Scheduler) ProcessReminders(ctx context.Context) error {
-	now := time.Now()
+	now := utils.NowInTaiwan()
 
 	// Early return optimization: check if there are any active reminders first
 	count, err := s.store.CountActiveReminders(ctx)
@@ -75,19 +76,19 @@ func (s *Scheduler) ProcessReminders(ctx context.Context) error {
 }
 
 func (s *Scheduler) processReminder(ctx context.Context, reminder *store.Reminder) error {
-	now := time.Now()
-	
-	notificationTime := reminder.ETA.Add(-time.Duration(reminder.AdvanceMinutes) * time.Minute)
+	now := utils.NowInTaiwan()
+	etaInTaipei := utils.ToTaiwan(reminder.ETA)
+	notificationTime := etaInTaipei.Add(-time.Duration(reminder.AdvanceMinutes) * time.Minute)
 	
 	log.Printf("Reminder %s evaluation: now=%s, notificationTime=%s, ETA=%s", 
-		reminder.ID, now.Format("15:04:05"), notificationTime.Format("15:04:05"), reminder.ETA.Format("15:04:05"))
+		reminder.ID, now.Format("15:04:05"), notificationTime.Format("15:04:05"), etaInTaipei.Format("15:04:05"))
 	
 	if now.Before(notificationTime) {
 		log.Printf("Reminder %s: Too early to send notification (current time before notification time)", reminder.ID)
 		return nil
 	}
 
-	if now.After(reminder.ETA) {
+	if now.After(etaInTaipei) {
 		log.Printf("Reminder %s: ETA has passed, marking as expired", reminder.ID)
 		err := s.store.UpdateReminderStatus(ctx, reminder.ID, "expired")
 		if err != nil {
@@ -112,7 +113,9 @@ func (s *Scheduler) processReminder(ctx context.Context, reminder *store.Reminde
 }
 
 func (s *Scheduler) sendReminderNotification(ctx context.Context, reminder *store.Reminder) error {
-	timeUntilArrival := time.Until(reminder.ETA)
+	now := utils.NowInTaiwan()
+	etaInTaipei := utils.ToTaiwan(reminder.ETA)
+	timeUntilArrival := etaInTaipei.Sub(now)
 	minutes := int(timeUntilArrival.Minutes())
 	
 	var message string
